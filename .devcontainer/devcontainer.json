@@ -1,0 +1,14 @@
+{
+    "name": "Rust Codespace",
+    "image": "mcr.microsoft.com/devcontainers/rust:1-ubuntu-24.04",
+    "features": {},
+    "postCreateCommand": "rustup component add clippy rustfmt",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "rust-lang.rust-analyzer",
+                "vadimcn.vscode-lldb"
+            ]
+        }
+    }
+}
