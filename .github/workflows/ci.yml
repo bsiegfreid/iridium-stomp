@@ -4,20 +4,14 @@ on:
   push:
   pull_request:
 
-### Reusable YAML anchors for common steps
-### We use anchors to avoid repeating the same checkout/setup blocks.
-## Define a sequence anchor for the checkout step
-checkout-step: &checkout-step
-  - name: Checkout
-    uses: actions/checkout@v4
-
 jobs:
   test:
     name: Smoke integration test
     runs-on: ubuntu-latest
 
     steps:
-      *checkout-step
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Build RabbitMQ (STOMP baked)
         run: |
@@ -69,7 +63,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      *checkout-step
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
@@ -88,7 +83,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      *checkout-step
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
@@ -110,7 +106,8 @@ jobs:
         toolchain: [stable, beta, nightly]
 
     steps:
-      *checkout-step
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Rust (matrix)
         uses: actions-rs/toolchain@v1
@@ -129,7 +126,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      *checkout-step
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Rust
         uses: actions-rs/toolchain@v1

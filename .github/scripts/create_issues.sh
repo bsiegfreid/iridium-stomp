@@ -16,7 +16,7 @@ if [ ${#files[@]} -eq 0 ]; then
 fi
 
 for f in "${files[@]}"; do
-  echo "\n---\nProcessing $f"
+  printf "\n---\nProcessing %s\n" "$f"
   title=$(grep -m1 '^Title:' "$f" | sed 's/^Title:[[:space:]]*//')
   if [ -z "$title" ]; then
     echo "  Skipping $f: no Title: header found"
@@ -53,4 +53,4 @@ for f in "${files[@]}"; do
   fi
 done
 
-echo "\nAll done. Check the repository issues: https://github.com/$REPO/issues"
+printf "\nAll done. Check the repository issues: https://github.com/%s/issues\n" "$REPO"
