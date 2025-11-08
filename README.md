@@ -1,70 +1,91 @@
 # iridium-stomp
 [![CI](https://github.com/bsiegfreid/iridium-stomp/actions/workflows/ci.yml/badge.svg)](https://github.com/bsiegfreid/iridium-stomp/actions/workflows/ci.yml)
 
-Asynchronous STOMP library in Rust.
+Asynchronous STOMP 1.2 client library for Rust — lightweight, async-first, and focused on correctness for heartbeats and reconnect behavior.
 
-## Running RabbitMQ with STOMP for local tests
+## Quick start:
 
-A lightweight RabbitMQ instance with the STOMP plugin is provided via `docker-compose.yml` at the repository root. This is intended for local development and tests.
+1. Add the crate to your project. If you are using the repository directly (not published on crates.io), add a dependency in your `Cargo.toml`:
 
-Quick start:
+```toml
+[dependencies]
+iridium-stomp = { git = "https://github.com/bsiegfreid/iridium-stomp", branch = "main" }
+```
+
+2. Run the provided smoke test against a local broker (convenient for validating your environment):
+
+```bash
+# Start a local test broker (see developer docs for docker-compose)
+docker compose up -d
+
+# Run the integration smoke test
+cargo test --test stomp_smoke
+```
+
+## Features & focus
+- Heartbeat negotiation and automatic reconnect on missed heartbeats
+- Framed STOMP encoder/decoder integrated with Tokio
+- Small, explicit API surface intended for embedding into async apps
+
+## Minimal usage example
+
+```rust
+use iridium_stomp::{Connection, Frame};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+	// Connect to a STOMP broker (addr, login, passcode, client-heartbeat)
+	let mut conn = Connection::connect("127.0.0.1:61613", "guest", "guest", "10000,10000").await?;
+
+	// Send a simple message to a destination
+	let msg = Frame::new("SEND")
+		.header("destination", "/queue/test")
+		.set_body(b"hello from iridium-stomp".to_vec());
+
+	conn.send_frame(msg).await?;
+
+	// Read one incoming frame (if any)
+	if let Some(frame) = conn.next_frame().await {
+		println!("received frame: {}", frame);
+	}
+
+	// Close the connection (consumes the Connection)
+	conn.close().await;
+
+	Ok(())
+}
+```
+
+
+Where to find developer docs and tests
+- Developer-focused test & run instructions are in `CONTRIBUTING.md` at the repo root.
+- Integration smoke test: `tests/stomp_smoke.rs`.
+
+Contributing
+- If you're working on the library internals, consult `CONTRIBUTING.md` for instructions on running RabbitMQ locally and CI behavior.
+- Backlog items and roadmap are in `.github/issues/` (drafts) — run the script `.github/scripts/create_issues.sh` to convert drafts into GitHub issues.
+
+## License
+- This project is licensed under the MIT License (see `LICENSE`).
+
+## Running the quickstart example
+
+To run the example added in `examples/quickstart.rs`:
+
+1. Start a local STOMP-capable broker (RabbitMQ with the STOMP plugin is recommended):
 
 ```bash
 docker compose up -d
 ```
 
-Check status and logs:
+2. From the crate directory, run the example:
 
 ```bash
-docker compose ps
-docker compose logs -f rabbitmq
-```
-
-Access points:
-- Management UI: http://localhost:15672  (user: `guest` / `guest`)
-- AMQP: `localhost:5672`
-- STOMP: `localhost:61613`
-
-Stop and remove the container and data volume:
-
-```bash
-docker compose down -v
+cd iridium-stomp
+cargo run --example quickstart
 ```
 
 Notes:
-- If you need different credentials, update `RABBITMQ_DEFAULT_USER` and `RABBITMQ_DEFAULT_PASS` in `docker-compose.yml`.
-- The compose service enables `rabbitmq_stomp` and `rabbitmq_management` before starting the server and includes a healthcheck.
-
-## Helper script: build, run, test, cleanup
-
-A small helper script is provided at `scripts/test-with-rabbit.sh` that builds a RabbitMQ image with the STOMP plugin baked in, runs it locally, waits for STOMP to be ready, runs the Rust smoke test, and cleans up the container and image.
-
-Usage (from the repository root):
-
-```bash
-./scripts/test-with-rabbit.sh
-```
-
-You can override environment variables to customize behavior:
-
-```bash
-IMAGE_NAME=iridium-rabbitmq-stomp:local \ 
-	CONTAINER_NAME=iridium_rabbitmq_local \ 
-	TIMEOUT_SECONDS=90 \ 
-	./scripts/test-with-rabbit.sh
-```
-
-What it does:
-- Builds `.github/docker/rabbitmq-stomp/Dockerfile` which enables `rabbitmq_stomp` and `rabbitmq_management` at build time.
-- Runs the container mapping 61613 (STOMP), 5672 (AMQP), and 15672 (management) to localhost.
-- Waits for the STOMP port to accept connections (default 60s).
-- Runs the Rust integration smoke test `iridium-stomp/tests/stomp_smoke.rs`.
-- Prints RabbitMQ logs if the test fails and always removes the container/image on exit.
-
-## CI
-
-A GitHub Actions workflow is available at `.github/workflows/ci.yml`. It builds the baked RabbitMQ image, starts it on the runner, waits for STOMP to be reachable on `localhost:61613`, and executes the same Rust smoke test.
-
-Notes:
-- The CI workflow builds and runs Docker on the runner (no external registry required).
-- The CI workflow builds and runs Docker on the runner (no external registry required).
+- The example connects to `127.0.0.1:61613` using the `guest`/`guest` credentials by default.
+- The example will time out waiting for an incoming frame after 5 seconds and exit cleanly if none arrives.
+- If you want the example validated on CI, I can add a build-only job that runs `cargo build --examples`.
