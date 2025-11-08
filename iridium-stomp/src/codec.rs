@@ -48,7 +48,11 @@ impl Decoder for StompCodec {
             let command_end = buf.iter().position(|&b| b == b'\n').unwrap_or(buf.len());
 
             // header slice is between command_end+1 and sep_pos
-            let header_start = if command_end < buf.len() { command_end + 1 } else { command_end };
+            let header_start = if command_end < buf.len() {
+                command_end + 1
+            } else {
+                command_end
+            };
             let header_slice = if sep_pos > header_start {
                 &buf[header_start..sep_pos]
             } else {
@@ -175,18 +179,21 @@ impl Decoder for StompCodec {
                                     continue;
                                 }
                                 if let Some(colon_pos) = line.iter().position(|&b| b == b':') {
-                                    let k = String::from_utf8(line[..colon_pos].to_vec()).map_err(|e| {
-                                        io::Error::new(
-                                            io::ErrorKind::InvalidData,
-                                            format!("invalid utf8 in header key: {}", e),
-                                        )
-                                    })?;
-                                    let v = String::from_utf8(line[colon_pos + 1..].to_vec()).map_err(|e| {
-                                        io::Error::new(
-                                            io::ErrorKind::InvalidData,
-                                            format!("invalid utf8 in header value: {}", e),
-                                        )
-                                    })?;
+                                    let k = String::from_utf8(line[..colon_pos].to_vec()).map_err(
+                                        |e| {
+                                            io::Error::new(
+                                                io::ErrorKind::InvalidData,
+                                                format!("invalid utf8 in header key: {}", e),
+                                            )
+                                        },
+                                    )?;
+                                    let v = String::from_utf8(line[colon_pos + 1..].to_vec())
+                                        .map_err(|e| {
+                                            io::Error::new(
+                                                io::ErrorKind::InvalidData,
+                                                format!("invalid utf8 in header value: {}", e),
+                                            )
+                                        })?;
                                     headers.push((k, v));
                                 }
                             }
