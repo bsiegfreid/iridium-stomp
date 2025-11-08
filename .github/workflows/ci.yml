@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build RabbitMQ (STOMP baked)
+        run: |
+          docker build -t iridium-rabbitmq-stomp:ci .github/docker/rabbitmq-stomp
+
+      - name: Start RabbitMQ container
+        run: |
+          docker run -d --name iridium_rabbitmq_ci \
+            -e RABBITMQ_DEFAULT_USER=guest \
+            -e RABBITMQ_DEFAULT_PASS=guest \
+            -p 5672:5672 -p 61613:61613 -p 15672:15672 \
+            iridium-rabbitmq-stomp:ci
+
+      - name: Wait for STOMP port
+        run: |
+          set -e
+          for i in $(seq 1 60); do
+            if (echo > /dev/tcp/localhost/61613) >/dev/null 2>&1; then
+              echo "STOMP port open"
+              break
+            fi
+            echo "waiting for STOMP port... ($i)"
+            sleep 1
+          done
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Run Rust smoke test
+        working-directory: iridium-stomp
+        run: |
+          cargo test --test stomp_smoke -- --nocapture
+
+      - name: Dump RabbitMQ logs (for debugging)
+        if: failure()
+        run: docker logs iridium_rabbitmq_ci || true
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker rm -f iridium_rabbitmq_ci || true
+          docker image rm iridium-rabbitmq-stomp:ci || true
