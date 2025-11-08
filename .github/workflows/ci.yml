@@ -4,13 +4,20 @@ on:
   push:
   pull_request:
 
+### Reusable YAML anchors for common steps
+### We use anchors to avoid repeating the same checkout/setup blocks.
+## Define a sequence anchor for the checkout step
+checkout-step: &checkout-step
+  - name: Checkout
+    uses: actions/checkout@v4
+
 jobs:
   test:
+    name: Smoke integration test
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      *checkout-step
 
       - name: Build RabbitMQ (STOMP baked)
         run: |
@@ -56,3 +63,80 @@ jobs:
         run: |
           docker rm -f iridium_rabbitmq_ci || true
           docker image rm iridium-rabbitmq-stomp:ci || true
+
+  format:
+    name: Format check
+    runs-on: ubuntu-latest
+
+    steps:
+      *checkout-step
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Check formatting (cargo fmt)
+        working-directory: iridium-stomp
+        run: |
+          rustup component add rustfmt || true
+          cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+
+    steps:
+      *checkout-step
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Run clippy
+        working-directory: iridium-stomp
+        run: |
+          rustup component add clippy || true
+          cargo clippy --all-targets --all-features -- -D warnings
+
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        toolchain: [stable, beta, nightly]
+
+    steps:
+      *checkout-step
+
+      - name: Set up Rust (matrix)
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          override: true
+
+      - name: Run unit tests
+        working-directory: iridium-stomp
+        run: |
+          cargo test --lib --verbose
+
+  build-examples:
+    name: Build examples
+    needs: [format, clippy, unit-tests]
+    runs-on: ubuntu-latest
+
+    steps:
+      *checkout-step
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Build examples (crate)
+        working-directory: iridium-stomp
+        run: cargo build --examples --verbose
