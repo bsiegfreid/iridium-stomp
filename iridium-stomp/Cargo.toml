@@ -13,7 +13,7 @@ keywords = ["stomp"]
 [dependencies]
 
 # Async runtime and utilities
-tokio = { version = "1",features = ["net", "time", "rt-multi-thread", "sync", "macros"] }
+tokio = { version = "1", features = ["net", "time", "rt-multi-thread", "sync", "macros"] }
 bytes = "1"
 tokio-util = { version = "0.7", features = ["codec"] }
 futures = "0.3"

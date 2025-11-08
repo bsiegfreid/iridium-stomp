@@ -22,12 +22,12 @@ docker compose up -d
 cargo test --test stomp_smoke
 ```
 
-Features & focus
+## Features & focus
 - Heartbeat negotiation and automatic reconnect on missed heartbeats
 - Framed STOMP encoder/decoder integrated with Tokio
 - Small, explicit API surface intended for embedding into async apps
 
-Minimal usage example
+## Minimal usage example
 
 ```rust
 use iridium_stomp::{Connection, Frame};
@@ -56,18 +56,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+
 Where to find developer docs and tests
-- Developer-focused test & run instructions are in `README.dev.md` at the repo root.
+- Developer-focused test & run instructions are in `CONTRIBUTING.md` at the repo root.
 - Integration smoke test: `tests/stomp_smoke.rs`.
 
 Contributing
-- If you're working on the library internals, consult `README.dev.md` for instructions on running RabbitMQ locally and CI behavior.
+- If you're working on the library internals, consult `CONTRIBUTING.md` for instructions on running RabbitMQ locally and CI behavior.
 - Backlog items and roadmap are in `.github/issues/` (drafts) — run the script `.github/scripts/create_issues.sh` to convert drafts into GitHub issues.
 
-License
+## License
 - This project is licensed under the MIT License (see `LICENSE`).
 
-Running the quickstart example
+## Running the quickstart example
 
 To run the example added in `examples/quickstart.rs`:
 

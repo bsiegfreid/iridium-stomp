@@ -4,7 +4,7 @@ Asynchronous STOMP 1.2 client library for Rust — lightweight, async-first, and
 
 This README is the crate-level README used by Cargo and crates.io. For developer-facing instructions, CI, and helper scripts, see the repository root `README.md` and `CONTRIBUTING.md`.
 
-Quickstart (crate)
+## Quickstart (crate)
 
 Add the crate from GitHub for local testing:
 
