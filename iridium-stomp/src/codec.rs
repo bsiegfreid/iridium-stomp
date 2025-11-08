@@ -21,6 +21,12 @@ impl StompCodec {
     }
 }
 
+impl Default for StompCodec {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Decoder for StompCodec {
     type Item = StompItem;
     type Error = io::Error;
