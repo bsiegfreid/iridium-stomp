@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.11-management
+    container_name: iridium_rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # HTTP management UI
+      - "61613:61613"  # STOMP
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    # Ensure STOMP (and management) plugins are enabled before server start
+    command: >
+      bash -lc "rabbitmq-plugins enable --offline rabbitmq_stomp && rabbitmq-plugins enable --offline rabbitmq_management && rabbitmq-server"
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  rabbitmq_data:
+    name: iridium_rabbitmq_data
