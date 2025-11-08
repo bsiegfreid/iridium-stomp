@@ -50,7 +50,10 @@ impl Decoder for StompCodec {
             // command is the first line (up to the first LF), or the whole raw if no LF
             let command_end = raw.iter().position(|&b| b == b'\n').unwrap_or(raw.len());
             let command = String::from_utf8(raw[..command_end].to_vec()).map_err(|e| {
-                io::Error::new(io::ErrorKind::InvalidData, format!("invalid utf8 in command: {}", e))
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("invalid utf8 in command: {}", e),
+                )
             })?;
 
             // find the index of the blank line separating headers and body
@@ -71,11 +74,18 @@ impl Decoder for StompCodec {
                         }
                         if let Some(colon_pos) = line.iter().position(|&b| b == b':') {
                             let k = String::from_utf8(line[..colon_pos].to_vec()).map_err(|e| {
-                                io::Error::new(io::ErrorKind::InvalidData, format!("invalid utf8 in header key: {}", e))
+                                io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    format!("invalid utf8 in header key: {}", e),
+                                )
                             })?;
-                            let v = String::from_utf8(line[colon_pos + 1..].to_vec()).map_err(|e| {
-                                io::Error::new(io::ErrorKind::InvalidData, format!("invalid utf8 in header value: {}", e))
-                            })?;
+                            let v =
+                                String::from_utf8(line[colon_pos + 1..].to_vec()).map_err(|e| {
+                                    io::Error::new(
+                                        io::ErrorKind::InvalidData,
+                                        format!("invalid utf8 in header value: {}", e),
+                                    )
+                                })?;
                             headers.push((k, v));
                         }
                     }
@@ -83,11 +93,19 @@ impl Decoder for StompCodec {
 
                 let body = raw[body_off..].to_vec();
 
-                let frame = Frame { command, headers, body };
+                let frame = Frame {
+                    command,
+                    headers,
+                    body,
+                };
                 return Ok(Some(StompItem::Frame(frame)));
             } else {
                 // No separator found; treat entire remaining as command-only frame (no headers/body)
-                let frame = Frame { command, headers: Vec::new(), body: Vec::new() };
+                let frame = Frame {
+                    command,
+                    headers: Vec::new(),
+                    body: Vec::new(),
+                };
                 return Ok(Some(StompItem::Frame(frame)));
             }
         }
