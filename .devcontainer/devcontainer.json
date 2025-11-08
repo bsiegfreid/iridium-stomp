@@ -3,6 +3,14 @@
     "image": "mcr.microsoft.com/devcontainers/rust:1",
     "features": {},
     "postCreateCommand": "rustup component add clippy rustfmt",
+    // Mount the host Docker socket so the container can use the host Docker daemon
+    // Rebuild the dev container after this change.
+    "runArgs": [
+        "-v",
+        "/var/run/docker.sock:/var/run/docker.sock",
+        "--group-add",
+        "800"
+    ],
     "customizations": {
         "vscode": {
             "extensions": [

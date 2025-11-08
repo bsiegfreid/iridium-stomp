@@ -24,9 +24,10 @@ fn stomp_smoke_connects() -> Result<(), Box<dyn std::error::Error>> {
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
 
-    // Send a minimal STOMP CONNECT frame and expect CONNECTED in response.
+    // Send a STOMP CONNECT frame (include login/passcode) and expect CONNECTED in response.
     let mut stream = stream;
-    let frame = "CONNECT\naccept-version:1.2\nhost:localhost\n\n\0";
+    // Use the default virtual host (/) instead of 'localhost' which RabbitMQ rejects by default
+    let frame = "CONNECT\naccept-version:1.2\nhost:/\nlogin:guest\npasscode:guest\n\n\0";
     stream.write_all(frame.as_bytes())?;
 
     let mut reader = BufReader::new(stream);
