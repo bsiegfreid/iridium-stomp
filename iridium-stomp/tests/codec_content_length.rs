@@ -8,10 +8,18 @@ fn decode_with_content_length_and_nul_in_body() {
 
     // command = MESSAGE\n, header content-length:3\n, blank line, body = b"a\0b" (3 bytes), then NUL terminator
     // Build a proper raw buffer: header + body (with embedded NUL) + NUL terminator
-    let raw = b"MESSAGE\ncontent-length:3\n\n".iter().chain(b"a\0b").cloned().chain(std::iter::once(0u8)).collect::<Vec<u8>>();
+    let raw = b"MESSAGE\ncontent-length:3\n\n"
+        .iter()
+        .chain(b"a\0b")
+        .cloned()
+        .chain(std::iter::once(0u8))
+        .collect::<Vec<u8>>();
     let mut buf = BytesMut::from(raw.as_slice());
 
-    let item = codec.decode(&mut buf).expect("decode error").expect("no item");
+    let item = codec
+        .decode(&mut buf)
+        .expect("decode error")
+        .expect("no item");
     match item {
         iridium_stomp::StompItem::Frame(f) => {
             assert_eq!(f.command, "MESSAGE");
