@@ -1,4 +1,6 @@
 # iridium-stomp
+[![CI](https://github.com/bsiegfreid/iridium-stomp/actions/workflows/ci.yml/badge.svg)](https://github.com/bsiegfreid/iridium-stomp/actions/workflows/ci.yml)
+
 Asynchronous STOMP library in Rust.
 
 ## Running RabbitMQ with STOMP for local tests
