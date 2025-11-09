@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  smoke:
     name: Smoke integration test
     runs-on: ubuntu-latest
 
@@ -44,7 +44,7 @@ jobs:
           override: true
 
       - name: Run Rust smoke test
-        working-directory: iridium-stomp
+        working-directory: ./iridium-stomp
         run: |
           cargo test --test stomp_smoke -- --nocapture
 
@@ -61,6 +61,9 @@ jobs:
   format:
     name: Format check
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./iridium-stomp
 
     steps:
       - name: Checkout
@@ -73,7 +76,6 @@ jobs:
           override: true
 
       - name: Check formatting (cargo fmt)
-        working-directory: iridium-stomp
         run: |
           rustup component add rustfmt || true
           cargo fmt --all -- --check
@@ -81,6 +83,9 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./iridium-stomp
 
     steps:
       - name: Checkout
@@ -93,7 +98,6 @@ jobs:
           override: true
 
       - name: Run clippy
-        working-directory: iridium-stomp
         run: |
           rustup component add clippy || true
           cargo clippy --all-targets --all-features -- -D warnings
@@ -104,6 +108,9 @@ jobs:
     strategy:
       matrix:
         toolchain: [stable, beta, nightly]
+    defaults:
+      run:
+        working-directory: ./iridium-stomp
 
     steps:
       - name: Checkout
@@ -116,7 +123,6 @@ jobs:
           override: true
 
       - name: Run unit tests
-        working-directory: iridium-stomp
         run: |
           cargo test --lib --verbose
 
@@ -124,6 +130,9 @@ jobs:
     name: Build examples
     needs: [format, clippy, unit-tests]
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./iridium-stomp
 
     steps:
       - name: Checkout
@@ -136,5 +145,4 @@ jobs:
           override: true
 
       - name: Build examples (crate)
-        working-directory: iridium-stomp
         run: cargo build --examples --verbose

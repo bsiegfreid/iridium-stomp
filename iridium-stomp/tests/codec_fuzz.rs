@@ -51,9 +51,7 @@ fn randomized_splits_multiple_frames() {
                     // basic sanity: bodies should match one of the original
                     let b = f.body.clone();
                     let s = b.as_slice();
-                    assert!(
-                        s == b"alpha" || s == b"omega" || s == [0u8, 1, 2, 3, 4].as_slice()
-                    );
+                    assert!(s == b"alpha" || s == b"omega" || s == [0u8, 1, 2, 3, 4].as_slice());
                     decoded_count += 1;
                 }
                 Ok(Some(StompItem::Heartbeat)) => { /* ignore */ }
