@@ -164,6 +164,20 @@ impl Decoder for StompCodec {
             src.advance(1);
 
             let raw = frame_bytes.to_vec();
+            // Recompute the header/body separator position relative to the
+            // extracted frame bytes to avoid relying on indices computed from
+            // the original `src` buffer (which may change in concurrent or
+            // incremental scenarios). This also prevents out-of-bounds
+            // slicing if indexes were inconsistent.
+            let sep_rel = raw
+                .windows(sep.len())
+                .position(|w| w == sep)
+                .ok_or_else(|| {
+                    // Debugging: emit a short hex dump to help diagnose inconsistent
+                    // separator positions observed in concurrent stress tests.
+                    let _ = eprintln!("missing header separator in frame; raw len={}", raw.len());
+                    io::Error::new(io::ErrorKind::InvalidData, "missing header separator in frame")
+                })?;
             if raw.is_empty() {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, "empty frame"));
             }
@@ -176,7 +190,7 @@ impl Decoder for StompCodec {
                 )
             })?;
 
-            let body_start = sep_pos + sep.len();
+            let body_start = sep_rel + sep.len();
             let body = raw[body_start..].to_vec();
 
             let frame = Frame {
@@ -205,13 +219,20 @@ impl Decoder for StompCodec {
                 )
             })?;
 
-            let header_slice = if sep_pos > cmd_end + 1 {
-                &raw[cmd_end + 1..sep_pos]
+            // Recompute the separator position within the extracted raw
+            // bytes so header parsing uses correct offsets.
+            let sep_rel = raw
+                .windows(sep.len())
+                .position(|w| w == sep)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing header separator in frame"))?;
+
+            let header_slice = if sep_rel > cmd_end + 1 {
+                &raw[cmd_end + 1..sep_rel]
             } else {
                 &[][..]
             };
             let (headers, _cl) = parse_headers(header_slice)?;
-            let body = raw[sep_pos + sep.len()..].to_vec();
+            let body = raw[sep_rel + sep.len()..].to_vec();
 
             let frame = Frame {
                 command,
