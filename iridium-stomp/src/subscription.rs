@@ -1,10 +1,10 @@
 use crate::connection::ConnError;
-use crate::frame::Frame;
 use crate::connection::Connection;
-use tokio::sync::mpsc;
+use crate::frame::Frame;
+use futures::stream::Stream;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use futures::stream::Stream;
+use tokio::sync::mpsc;
 
 /// Options to configure a subscription. `headers` are forwarded to the
 /// broker as-is when sending the SUBSCRIBE frame and persisted locally so
@@ -35,8 +35,18 @@ pub struct Subscription {
 }
 
 impl Subscription {
-    pub(crate) fn new(id: String, destination: String, receiver: mpsc::Receiver<Frame>, conn: Connection) -> Self {
-        Self { id, destination, receiver, conn }
+    pub(crate) fn new(
+        id: String,
+        destination: String,
+        receiver: mpsc::Receiver<Frame>,
+        conn: Connection,
+    ) -> Self {
+        Self {
+            id,
+            destination,
+            receiver,
+            conn,
+        }
     }
 
     /// Returns the local subscription id.

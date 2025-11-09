@@ -1,6 +1,6 @@
-use iridium_stomp::{Connection, SubscriptionOptions};
-use iridium_stomp::connection::AckMode;
 use futures::StreamExt;
+use iridium_stomp::connection::AckMode;
+use iridium_stomp::{Connection, SubscriptionOptions};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -19,9 +19,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         headers: vec![],
     };
 
-    let mut subscription = conn.subscribe_with_options("/exchange/topic", AckMode::Client, opts).await?;
+    let mut subscription = conn
+        .subscribe_with_options("/exchange/topic", AckMode::Client, opts)
+        .await?;
 
-    println!("subscribed id={} dest={}", subscription.id(), subscription.destination());
+    println!(
+        "subscribed id={} dest={}",
+        subscription.id(),
+        subscription.destination()
+    );
 
     // Use the Subscription as a Stream directly (we implemented Stream for Subscription)
     while let Some(frame) = subscription.next().await {
