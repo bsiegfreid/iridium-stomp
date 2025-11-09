@@ -1,16 +1,8 @@
-//! Top-level library exports for the `iridium-stomp` crate.
-//!
-//! This crate provides a small STOMP 1.2 client codec and connection manager
-//! (heartbeat negotiation, basic reconnect behavior). The primary types are
-//! exported here for easy consumption.
-//!
-//! Public API
-//! - `StompCodec` / `StompItem`: the tokio util codec and item type used to
-//!   encode/decode STOMP frames and heartbeats.
-//! - `Connection`: high-level connection manager that handles connect,
-//!   heartbeat negotiation, background IO, and simple reconnect logic.
-//! - `Frame`: a small POJO-like representation of a STOMP frame.
+#![doc = include_str!("../README.md")]
 
+//! Additional user-facing guides from the `docs/` directory are exposed as
+//! rustdoc modules so they appear on docs.rs. See the `subscriptions_docs`
+//! module for information about durable subscriptions and `SubscriptionOptions`.
 pub mod codec;
 pub mod connection;
 pub mod frame;
@@ -28,6 +20,12 @@ pub use connection::{Connection, negotiate_heartbeats, parse_heartbeat_header};
 pub use frame::Frame;
 pub use subscription::Subscription;
 pub use subscription::SubscriptionOptions;
+
+// Expose the repository `docs/subscriptions.md` as a public rustdoc page so it
+// appears alongside the API docs on docs.rs / rustdoc. The module is empty and
+// only serves to carry the included markdown.
+#[doc = include_str!("../docs/subscriptions.md")]
+pub mod subscriptions_docs {}
 
 #[cfg(test)]
 mod tests {

@@ -9,6 +9,11 @@ repository = "https://github.com/bsiegfreid/iridium-stomp"
 homepage = "https://github.com/bsiegfreid/iridium-stomp"
 documentation = "https://docs.rs/iridium-stomp"
 keywords = ["stomp"]
+# Ensure docs files are packaged and instruct docs.rs to build with all features
+include = ["src/**", "Cargo.toml", "README.md", "LICENSE", "docs/**"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [dependencies]
 
