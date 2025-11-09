@@ -17,6 +17,7 @@ pub(crate) struct SubscriptionEntry {
     pub(crate) id: String,
     pub(crate) sender: mpsc::Sender<Frame>,
     pub(crate) ack: String,
+    pub(crate) headers: Vec<(String, String)>,
 }
 
 /// Alias for the subscription dispatch map: destination -> list of
@@ -25,6 +26,9 @@ pub(crate) type Subscriptions = HashMap<String, Vec<SubscriptionEntry>>;
 
 /// Alias for the pending map: subscription_id -> queue of (message-id, Frame).
 pub(crate) type PendingMap = HashMap<String, VecDeque<(String, Frame)>>;
+
+/// Internal type for resubscribe snapshot entries: (destination, id, ack, headers)
+pub(crate) type ResubEntry = (String, String, String, Vec<(String, String)>);
 
 /// Errors returned by `Connection` operations.
 #[derive(Error, Debug)]
@@ -245,23 +249,31 @@ impl Connection {
                         // Resubscribe any existing subscriptions after reconnect.
                         // We snapshot the subscription entries while holding the lock
                         // and then issue SUBSCRIBE frames using the sink.
-                        let subs_snapshot = {
+                        let subs_snapshot: Vec<ResubEntry> = {
                             let map = subscriptions.lock().await;
-                            let mut v: Vec<(String, String, String)> = Vec::new();
+                            let mut v: Vec<ResubEntry> = Vec::new();
                             for (dest, vec) in map.iter() {
                                 for entry in vec.iter() {
-                                    v.push((dest.clone(), entry.id.clone(), entry.ack.clone()));
+                                    v.push((
+                                        dest.clone(),
+                                        entry.id.clone(),
+                                        entry.ack.clone(),
+                                        entry.headers.clone(),
+                                    ));
                                 }
                             }
                             v
                         };
 
-                        for (dest, id, ack) in subs_snapshot {
+                        for (dest, id, ack, headers) in subs_snapshot {
                             let mut sf = Frame::new("SUBSCRIBE");
                             sf = sf
                                 .header("id", &id)
                                 .header("destination", &dest)
                                 .header("ack", &ack);
+                            for (k, v) in headers {
+                                sf = sf.header(&k, &v);
+                            }
                             let _ = sink.send(StompItem::Frame(sf)).await;
                         }
 
@@ -449,10 +461,16 @@ impl Connection {
     /// the opaque id assigned locally for this subscription and `receiver` is a
     /// `mpsc::Receiver<Frame>` which will yield incoming MESSAGE frames for the
     /// destination. The caller should read from the receiver to handle messages.
-    pub async fn subscribe(
+    /// Subscribe to a destination using optional extra headers.
+    ///
+    /// This variant accepts additional headers which are stored locally and
+    /// re-sent on reconnect. Use `subscribe` as a convenience wrapper when no
+    /// extra headers are needed.
+    pub async fn subscribe_with_headers(
         &self,
         destination: &str,
         ack: AckMode,
+        extra_headers: Vec<(String, String)>,
     ) -> Result<crate::subscription::Subscription, ConnError> {
         let id = self
             .sub_id_counter
@@ -467,6 +485,7 @@ impl Connection {
                     id: id.clone(),
                     sender: tx.clone(),
                     ack: ack.as_str().to_string(),
+                    headers: extra_headers.clone(),
                 });
         }
 
@@ -475,12 +494,39 @@ impl Connection {
             .header("id", &id)
             .header("destination", destination)
             .header("ack", ack.as_str());
+        for (k, v) in &extra_headers {
+            f = f.header(k, v);
+        }
         self.outbound_tx
             .send(StompItem::Frame(f))
             .await
             .map_err(|_| ConnError::Protocol("send channel closed".into()))?;
 
         Ok(crate::subscription::Subscription::new(id, destination.to_string(), rx, self.clone()))
+    }
+
+    /// Convenience wrapper without extra headers.
+    pub async fn subscribe(
+        &self,
+        destination: &str,
+        ack: AckMode,
+    ) -> Result<crate::subscription::Subscription, ConnError> {
+        self.subscribe_with_headers(destination, ack, Vec::new()).await
+    }
+
+    /// Subscribe with a typed `SubscriptionOptions` structure.
+    ///
+    /// `SubscriptionOptions.headers` are forwarded to the broker and persisted
+    /// for automatic resubscribe after reconnect. If `durable_queue` is set,
+    /// it will be used as the actual destination instead of `destination`.
+    pub async fn subscribe_with_options(
+        &self,
+        destination: &str,
+        ack: AckMode,
+        options: crate::subscription::SubscriptionOptions,
+    ) -> Result<crate::subscription::Subscription, ConnError> {
+        let dest = options.durable_queue.as_deref().unwrap_or(destination).to_string();
+        self.subscribe_with_headers(&dest, ack, options.headers).await
     }
 
     /// Unsubscribe a previously created subscription by its local subscription id.
@@ -728,6 +774,7 @@ mod tests {
                     id: "s1".to_string(),
                     sender: sub_sender,
                     ack: "client".to_string(),
+                    headers: Vec::new(),
                 }],
             );
         }
@@ -804,6 +851,7 @@ mod tests {
                     id: "s2".to_string(),
                     sender: sub_sender,
                     ack: "client-individual".to_string(),
+                    headers: Vec::new(),
                 }],
             );
         }
