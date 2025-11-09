@@ -10,14 +10,25 @@ use tokio_util::codec::Framed;
 use crate::codec::{StompCodec, StompItem};
 use crate::frame::Frame;
 
+/// Errors returned by `Connection` operations.
 #[derive(Error, Debug)]
 pub enum ConnError {
+    /// I/O-level error
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    /// Protocol-level error
     #[error("protocol error: {0}")]
     Protocol(String),
 }
 
+/// Parse the STOMP `heart-beat` header value (format: "cx,cy").
+///
+/// Parameters
+/// - `header`: header string from the server or client (for example
+///   "10000,10000"). The values represent milliseconds.
+///
+/// Returns a tuple `(cx, cy)` where each value is the heartbeat interval in
+/// milliseconds. Missing or invalid fields default to `0`.
 pub fn parse_heartbeat_header(header: &str) -> (u64, u64) {
     let mut parts = header.split(',');
     let cx = parts
@@ -31,6 +42,20 @@ pub fn parse_heartbeat_header(header: &str) -> (u64, u64) {
     (cx, cy)
 }
 
+/// Negotiate heartbeat intervals between client and server.
+///
+/// Parameters
+/// - `client_out`: client's desired outgoing heartbeat interval in
+///   milliseconds (how often the client will send heartbeats).
+/// - `client_in`: client's desired incoming heartbeat interval in
+///   milliseconds (how often the client expects to receive heartbeats).
+/// - `server_out`: server's advertised outgoing interval in milliseconds.
+/// - `server_in`: server's advertised incoming interval in milliseconds.
+///
+/// Returns `(outgoing, incoming)` where each element is `Some(Duration)` if
+/// heartbeats are enabled in that direction, or `None` if disabled. The
+/// negotiated interval uses the STOMP rule of taking the maximum of the
+/// corresponding client and server values.
 pub fn negotiate_heartbeats(
     client_out: u64,
     client_in: u64,
@@ -53,6 +78,11 @@ pub fn negotiate_heartbeats(
     (outgoing, incoming)
 }
 
+/// High-level connection object that manages a single TCP/STOMP connection.
+///
+/// The `Connection` spawns a background task that maintains the TCP transport,
+/// sends/receives STOMP frames using `StompCodec`, negotiates heartbeats, and
+/// performs simple reconnect logic with exponential backoff.
 pub struct Connection {
     outbound_tx: mpsc::Sender<StompItem>,
     inbound_rx: mpsc::Receiver<Frame>,
@@ -60,6 +90,19 @@ pub struct Connection {
 }
 
 impl Connection {
+    /// Establish a connection to the STOMP server at `addr` with the given
+    /// credentials and heartbeat header string (e.g. "10000,10000").
+    ///
+    /// Parameters
+    /// - `addr`: TCP address (host:port) of the STOMP server.
+    /// - `login`: login username for STOMP `CONNECT`.
+    /// - `passcode`: passcode for STOMP `CONNECT`.
+    /// - `client_hb`: client's `heart-beat` header value ("cx,cy" in
+    ///   milliseconds) that will be sent in the `CONNECT` frame.
+    ///
+    /// Returns a `Connection` which provides `send_frame`, `next_frame`, and
+    /// `close` helpers. The detailed connection handling (I/O, heartbeats,
+    /// reconnects) runs on a background task spawned by this method.
     pub async fn connect(
         addr: &str,
         login: &str,
@@ -201,6 +244,11 @@ impl Connection {
     }
 
     pub async fn send_frame(&self, frame: Frame) -> Result<(), ConnError> {
+        // Send a frame to the background writer task.
+        //
+        // Parameters
+        // - `frame`: ownership of the `Frame` to send. The frame is converted
+        //   into a `StompItem::Frame` and sent over the internal mpsc channel.
         self.outbound_tx
             .send(StompItem::Frame(frame))
             .await
@@ -208,10 +256,16 @@ impl Connection {
     }
 
     pub async fn next_frame(&mut self) -> Option<Frame> {
+        // Receive the next inbound `Frame` produced by the background reader
+        // task. Returns `Some(Frame)` when available or `None` if the inbound
+        // channel has been closed.
         self.inbound_rx.recv().await
     }
 
     pub async fn close(self) {
+        // Signal the background task to shutdown by broadcasting on the
+        // shutdown channel. Consumers may await task termination separately
+        // if needed.
         let _ = self.shutdown_tx.send(());
     }
 }
