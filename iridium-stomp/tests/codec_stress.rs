@@ -42,19 +42,16 @@ async fn codec_concurrent_stress() {
                 let mut enc = BytesMut::new();
                 codec.encode(StompItem::Frame(frame), &mut enc).expect("encode");
 
-                // split into small random chunks
-                let mut off = 0usize;
-                while off < enc.len() {
-                    let sz = rng.gen_range(1..20).min(enc.len() - off);
-                    let chunk = enc[off..off + sz].to_vec();
-                    if tx.send(chunk).await.is_err() {
-                        return; // receiver closed
-                    }
-                    off += sz;
-                    // occasional tiny yield to increase interleaving
-                    if rng.gen_bool(0.05) {
-                        tokio::task::yield_now().await;
-                    }
+                // Send the entire encoded frame as a single chunk. This still
+                // allows interleaving between frames from different producers
+                // while avoiding pathological mid-frame splits that make the
+                // combined stream impossible to decode sensibly.
+                if tx.send(enc.to_vec()).await.is_err() {
+                    return; // receiver closed
+                }
+                // occasional tiny yield to increase interleaving
+                if rng.gen_bool(0.1) {
+                    tokio::task::yield_now().await;
                 }
             }
         });
@@ -63,19 +60,31 @@ async fn codec_concurrent_stress() {
     // drop original tx so channel closes after producers finish
     drop(tx);
 
-    // Decoder task: collect chunks and decode
+    // Decoder task: collect chunks and decode. Keep a record of received
+    // chunks so we can dump them when a decoder error occurs for diagnosis.
     let decode_task = tokio::spawn(async move {
         let mut dec = StompCodec::new();
         let mut buf = BytesMut::new();
         let mut decoded = 0usize;
+        let mut chunks_received: Vec<Vec<u8>> = Vec::new();
         while let Some(chunk) = rx.recv().await {
+            chunks_received.push(chunk.clone());
             buf.extend_from_slice(&chunk);
             loop {
                 match dec.decode(&mut buf) {
                     Ok(Some(StompItem::Frame(_))) => decoded += 1,
                     Ok(Some(StompItem::Heartbeat)) => {},
                     Ok(None) => break,
-                    Err(e) => panic!("decoder error: {}", e),
+                    Err(e) => {
+                        eprintln!("decoder error: {}", e);
+                        eprintln!("assembled buf (len={}):\n{:02x?}", buf.len(), &buf[..std::cmp::min(buf.len(), 256)]);
+                        eprintln!("received {} chunks; lengths: {:?}", chunks_received.len(), chunks_received.iter().map(|c| c.len()).collect::<Vec<_>>() );
+                        // print first few chunks hex
+                        for (i, c) in chunks_received.iter().enumerate().take(20) {
+                            eprintln!("chunk[{}] (len={}): {:02x?}", i, c.len(), &c[..std::cmp::min(c.len(), 64)]);
+                        }
+                        panic!("decoder error: {}", e);
+                    }
                 }
             }
         }
@@ -85,7 +94,11 @@ async fn codec_concurrent_stress() {
                 Ok(Some(StompItem::Frame(_))) => decoded += 1,
                 Ok(Some(StompItem::Heartbeat)) => {},
                 Ok(None) => break,
-                Err(e) => panic!("decoder error: {}", e),
+                Err(e) => {
+                    eprintln!("decoder error during drain: {}", e);
+                    eprintln!("assembled buf (len={}):\n{:02x?}", buf.len(), &buf[..std::cmp::min(buf.len(), 256)]);
+                    panic!("decoder error during drain: {}", e);
+                }
             }
         }
         decoded
