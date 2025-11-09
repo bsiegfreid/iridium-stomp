@@ -12,7 +12,7 @@ fn randomized_splits_multiple_frames() {
     let mut codec = StompCodec::new();
 
     // Build three frames with varying bodies
-    let frames = vec![
+    let frames = [
         Frame::new("SEND").set_body(b"alpha".to_vec()),
         Frame::new("SEND").set_body(vec![0u8, 1, 2, 3, 4]), // binary -> content-length
         Frame::new("SEND").set_body(b"omega".to_vec()),
@@ -50,10 +50,9 @@ fn randomized_splits_multiple_frames() {
                 Ok(Some(StompItem::Frame(f))) => {
                     // basic sanity: bodies should match one of the original
                     let b = f.body.clone();
+                    let s = b.as_slice();
                     assert!(
-                        b == b"alpha".to_vec()
-                            || b == b"omega".to_vec()
-                            || b == vec![0u8, 1, 2, 3, 4]
+                        s == b"alpha" || s == b"omega" || s == [0u8, 1, 2, 3, 4].as_slice()
                     );
                     decoded_count += 1;
                 }
