@@ -28,8 +28,9 @@ jobs:
           rustup component add rustfmt clippy
 
       - name: Build docs
+        working-directory: ./iridium-stomp
         run: |
-          cargo doc --manifest-path ./iridium-stomp/Cargo.toml --no-deps
+          cargo doc --no-deps
 
       - name: Publish to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3

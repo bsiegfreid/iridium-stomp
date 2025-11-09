@@ -30,8 +30,10 @@ jobs:
           rustup component add rustfmt clippy
 
       - name: Build docs
+        # run from the crate directory so the Cargo.toml is found without an explicit path
+        working-directory: .
         run: |
-          cargo doc --no-deps --workspace
+          cargo doc --no-deps
 
       - name: Publish to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
