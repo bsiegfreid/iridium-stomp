@@ -1,68 +1,12 @@
-use bytes::{BufMut, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 use std::io;
 use tokio_util::codec::{Decoder, Encoder};
 
 use crate::frame::Frame;
+use crate::parser::parse_frame_slice;
 
-/// Alias for the collection used to represent STOMP headers.
-///
-/// Each header is a (key, value) pair using owned `String`s.
-type Headers = Vec<(String, String)>;
-
-/// Parse the raw header block from a STOMP frame and extract an optional
-/// `content-length` header.
-///
-/// Parameters
-/// - `header_slice`: the bytes between the command's terminating LF and the
-///   blank-line separator that precedes the body. This slice may be empty.
-///
-/// Returns
-/// - `Ok((headers, Some(content_length)))` when a `content-length` header was
-///   present and parsed successfully.
-/// - `Ok((headers, None))` when no `content-length` header was present.
-/// - `Err(io::Error)` with `InvalidData` when header keys/values are not valid
-///   UTF-8 or when `content-length` is not a valid non-negative integer.
-fn parse_headers(header_slice: &[u8]) -> Result<(Headers, Option<usize>), io::Error> {
-    let mut headers: Headers = Vec::new();
-    let mut content_length: Option<usize> = None;
-
-    if header_slice.is_empty() {
-        return Ok((headers, content_length));
-    }
-
-    for line in header_slice.split(|&b| b == b'\n') {
-        if line.is_empty() {
-            continue;
-        }
-        if let Some(colon_pos) = line.iter().position(|&b| b == b':') {
-            let k = String::from_utf8(line[..colon_pos].to_vec()).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("invalid utf8 in header key: {}", e),
-                )
-            })?;
-            let v = String::from_utf8(line[colon_pos + 1..].to_vec()).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("invalid utf8 in header value: {}", e),
-                )
-            })?;
-            if k.to_lowercase() == "content-length" {
-                let parsed = v.trim().parse::<usize>().map_err(|_| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("invalid content-length value: {}", v),
-                    )
-                })?;
-                content_length = Some(parsed);
-            }
-            headers.push((k, v));
-        }
-    }
-
-    Ok((headers, content_length))
-}
-
+/// (parser-based implementation uses `src` directly; header parsing is
+/// delegated to the `parser` module.)
 /// Items produced or consumed by the codec.
 ///
 /// A `StompItem` is either a decoded `Frame` or a `Heartbeat` marker
@@ -85,16 +29,12 @@ pub enum StompItem {
 /// - Encode `StompItem` back into bytes for the wire format and emit
 ///   `content-length` when necessary.
 pub struct StompCodec {
-    /// Internal buffer which accumulates bytes across incremental `decode`
-    /// calls. Using an internal buffer avoids relying on indexes computed
-    /// from the `src` argument (which the caller may mutate between calls)
-    /// and simplifies parsing across arbitrary chunk boundaries.
-    buf: BytesMut,
+    // No internal buffer: we parse directly from the provided `src` buffer
 }
 
 impl StompCodec {
     pub fn new() -> Self {
-        Self { buf: BytesMut::new() }
+        Self {}
     }
 }
 
@@ -126,117 +66,58 @@ impl Decoder for StompCodec {
         // Move any newly-received bytes from the provided `src` into our
         // internal buffer. We keep a separate buffer so parsing can proceed
         // across arbitrary chunk boundaries without relying on indexes into
-        // the caller-owned `src` (which may be mutated between calls).
-        if !src.is_empty() {
-            self.buf.extend_from_slice(&src[..]);
-            src.clear();
-        }
-
-        let sep = b"\n\n";
-
-        // Heartbeat (single LF)
-        if !self.buf.is_empty() && self.buf[0] == b'\n' {
-            // consume the heartbeat byte
-            self.buf.split_to(1);
+        // heartbeat: single LF
+        if let Some(&b'\n') = src.chunk().first() {
+            src.advance(1);
             return Ok(Some(StompItem::Heartbeat));
         }
 
-        // Try to find the header/body separator. It's possible it isn't
-        // present yet (stream is fragmented). We don't return early here:
-        // even without the separator we can still decode a NUL-terminated
-        // frame if a full NUL-terminated chunk is available (some servers
-        // or split patterns may present a tiny frame that lacks a header
-        // separator in the current chunk view).
-        let sep_pos_opt = self.buf.windows(sep.len()).position(|w| w == sep);
+        let chunk = src.chunk();
+        match parse_frame_slice(chunk) {
+            Ok(Some((cmd_bytes, headers, body, consumed))) => {
+                // advance src by consumed
+                src.advance(consumed);
 
-        // find end of command (first LF) to compute header slice if we have sep
-        let command_end = self.buf.iter().position(|&b| b == b'\n').unwrap_or(self.buf.len());
-        let header_start = if command_end < self.buf.len() { command_end + 1 } else { command_end };
+                // build owned Frame
+                let command = String::from_utf8(cmd_bytes).map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("invalid utf8 in command: {}", e),
+                    )
+                })?;
+                // convert headers Vec<(Vec<u8>,Vec<u8>)> -> Vec<(String,String)>
+                let mut hdrs: Vec<(String, String)> = Vec::new();
+                for (k, v) in headers {
+                    let ks = String::from_utf8(k).map_err(|e| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("invalid utf8 in header key: {}", e),
+                        )
+                    })?;
+                    let vs = String::from_utf8(v).map_err(|e| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("invalid utf8 in header value: {}", e),
+                        )
+                    })?;
+                    hdrs.push((ks, vs));
+                }
 
-        // If we have a separator, parse headers and detect content-length.
-        if let Some(sep_pos) = sep_pos_opt {
-            let header_slice = if sep_pos > header_start { &self.buf[header_start..sep_pos] } else { &[][..] };
-            let (headers, content_length) = parse_headers(header_slice)?;
+                let body = body.unwrap_or_default();
 
-            if let Some(clen) = content_length {
-            // sep_pos + 2 (for "\n\n") + content + 1 (for trailing NUL)
-            let needed = sep_pos + sep.len() + clen + 1;
-            if self.buf.len() < needed {
-                return Ok(None);
+                let frame = Frame {
+                    command,
+                    headers: hdrs,
+                    body,
+                };
+                Ok(Some(StompItem::Frame(frame)))
             }
-
-            let nul_index = sep_pos + sep.len() + clen;
-            if self.buf[nul_index] != 0 {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "missing NUL after content-length body"));
-            }
-
-            // extract the full frame including the trailing NUL
-            let frame_with_nul = self.buf.split_to(nul_index + 1);
-            let raw = frame_with_nul[..nul_index].to_vec();
-
-            if raw.is_empty() {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "empty frame"));
-            }
-
-            // recompute separator relative to raw to safely slice headers/body
-            let sep_rel = raw.windows(sep.len()).position(|w| w == sep).ok_or_else(|| {
-                let _ = eprintln!("missing header separator in frame; raw len={}", raw.len());
-                io::Error::new(io::ErrorKind::InvalidData, "missing header separator in frame")
-            })?;
-
-            let cmd_end = raw.iter().position(|&b| b == b'\n').unwrap_or(raw.len());
-            let command = String::from_utf8(raw[..cmd_end].to_vec()).map_err(|e| {
-                io::Error::new(io::ErrorKind::InvalidData, format!("invalid utf8 in command: {}", e))
-            })?;
-
-            let body_start = sep_rel + sep.len();
-            let body = raw[body_start..].to_vec();
-
-            let frame = Frame { command, headers, body };
-            return Ok(Some(StompItem::Frame(frame)));
+            Ok(None) => Ok(None),
+            Err(e) => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("parse error: {}", e),
+            )),
         }
-        }
-
-        // If we didn't have a separator, we may still have a complete
-        // NUL-terminated frame available. Decode it permissively: use the
-        // first NUL as a frame terminator, treat the bytes before the first
-        // LF (if present) as the command, and treat headers as empty when
-        // the separator is absent. This accepts tiny frames like
-        // `"COMMAND\0"` (no headers) which can appear in split patterns.
-        if let Some(nul_pos) = self.buf.iter().position(|&b| b == 0) {
-            // consume up to and including the NUL
-            let frame_with_nul = self.buf.split_to(nul_pos + 1);
-            let raw = frame_with_nul[..nul_pos].to_vec();
-
-            if raw.is_empty() {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "empty frame"));
-            }
-
-            let cmd_end = raw.iter().position(|&b| b == b'\n').unwrap_or(raw.len());
-            let command = String::from_utf8(raw[..cmd_end].to_vec()).map_err(|e| {
-                io::Error::new(io::ErrorKind::InvalidData, format!("invalid utf8 in command: {}", e))
-            })?;
-
-            // If a separator exists within raw, use it to split headers/body,
-            // otherwise assume no headers and empty body.
-            let body = if let Some(sep_rel) = raw.windows(sep.len()).position(|w| w == sep) {
-                let header_slice = if sep_rel > cmd_end + 1 { &raw[cmd_end + 1..sep_rel] } else { &[][..] };
-                let (_headers, _cl) = parse_headers(header_slice)?;
-                raw[sep_rel + sep.len()..].to_vec()
-            } else {
-                // no separator in raw -> no headers, body is empty
-                Vec::new()
-            };
-
-            let headers = if let Some(sep_rel) = raw.windows(sep.len()).position(|w| w == sep) {
-                if sep_rel > cmd_end + 1 { parse_headers(&raw[cmd_end + 1..sep_rel])?.0 } else { Vec::new() }
-            } else { Vec::new() };
-
-            let frame = Frame { command, headers, body };
-            return Ok(Some(StompItem::Frame(frame)));
-        }
-
-        Ok(None)
     }
 }
 

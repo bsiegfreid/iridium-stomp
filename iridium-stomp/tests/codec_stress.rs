@@ -1,10 +1,10 @@
 use bytes::BytesMut;
 use iridium_stomp::codec::{StompCodec, StompItem};
 use iridium_stomp::frame::Frame;
-use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use tokio::sync::mpsc;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 use tokio_util::codec::{Decoder, Encoder};
 
 // Multi-producer stress test: N producers each generate M frames, encode them
@@ -21,7 +21,7 @@ async fn codec_concurrent_stress() {
 
     // Spawn producers
     for p in 0..producers {
-        let mut tx = tx.clone();
+        let tx = tx.clone();
         tokio::spawn(async move {
             let mut rng = StdRng::from_seed([p as u8; 32]);
             let mut codec = StompCodec::new();
@@ -40,7 +40,9 @@ async fn codec_concurrent_stress() {
 
                 let frame = Frame::new("SEND").set_body(body);
                 let mut enc = BytesMut::new();
-                codec.encode(StompItem::Frame(frame), &mut enc).expect("encode");
+                codec
+                    .encode(StompItem::Frame(frame), &mut enc)
+                    .expect("encode");
 
                 // Send the entire encoded frame as a single chunk. This still
                 // allows interleaving between frames from different producers
@@ -73,15 +75,28 @@ async fn codec_concurrent_stress() {
             loop {
                 match dec.decode(&mut buf) {
                     Ok(Some(StompItem::Frame(_))) => decoded += 1,
-                    Ok(Some(StompItem::Heartbeat)) => {},
+                    Ok(Some(StompItem::Heartbeat)) => {}
                     Ok(None) => break,
                     Err(e) => {
                         eprintln!("decoder error: {}", e);
-                        eprintln!("assembled buf (len={}):\n{:02x?}", buf.len(), &buf[..std::cmp::min(buf.len(), 256)]);
-                        eprintln!("received {} chunks; lengths: {:?}", chunks_received.len(), chunks_received.iter().map(|c| c.len()).collect::<Vec<_>>() );
+                        eprintln!(
+                            "assembled buf (len={}):\n{:02x?}",
+                            buf.len(),
+                            &buf[..std::cmp::min(buf.len(), 256)]
+                        );
+                        eprintln!(
+                            "received {} chunks; lengths: {:?}",
+                            chunks_received.len(),
+                            chunks_received.iter().map(|c| c.len()).collect::<Vec<_>>()
+                        );
                         // print first few chunks hex
                         for (i, c) in chunks_received.iter().enumerate().take(20) {
-                            eprintln!("chunk[{}] (len={}): {:02x?}", i, c.len(), &c[..std::cmp::min(c.len(), 64)]);
+                            eprintln!(
+                                "chunk[{}] (len={}): {:02x?}",
+                                i,
+                                c.len(),
+                                &c[..std::cmp::min(c.len(), 64)]
+                            );
                         }
                         panic!("decoder error: {}", e);
                     }
@@ -92,11 +107,15 @@ async fn codec_concurrent_stress() {
         loop {
             match dec.decode(&mut buf) {
                 Ok(Some(StompItem::Frame(_))) => decoded += 1,
-                Ok(Some(StompItem::Heartbeat)) => {},
+                Ok(Some(StompItem::Heartbeat)) => {}
                 Ok(None) => break,
                 Err(e) => {
                     eprintln!("decoder error during drain: {}", e);
-                    eprintln!("assembled buf (len={}):\n{:02x?}", buf.len(), &buf[..std::cmp::min(buf.len(), 256)]);
+                    eprintln!(
+                        "assembled buf (len={}):\n{:02x?}",
+                        buf.len(),
+                        &buf[..std::cmp::min(buf.len(), 256)]
+                    );
                     panic!("decoder error during drain: {}", e);
                 }
             }

@@ -12,15 +12,26 @@ fn replay_problematic_chunk_sequence() {
     // Chunks captured from a failing run (hex bytes from logs).
     let chunks: Vec<&[u8]> = vec![
         &[0x53, 0x45],
-        &[0x4e, 0x44, 0x0a, 0x0a, 0x70, 0x72, 0x6f, 0x64, 0x75, 0x63, 0x65, 0x72, 0x2d, 0x30, 0x2d],
+        &[
+            0x4e, 0x44, 0x0a, 0x0a, 0x70, 0x72, 0x6f, 0x64, 0x75, 0x63, 0x65, 0x72, 0x2d, 0x30,
+            0x2d,
+        ],
         &[0x6d, 0x73, 0x67, 0x2d, 0x30, 0x00],
-        &[0x53, 0x45, 0x4e, 0x44, 0x0a, 0x0a, 0x70, 0x72, 0x6f, 0x64, 0x75, 0x63, 0x65, 0x72, 0x2d, 0x30],
-        &[0x53, 0x45, 0x4e, 0x44, 0x0a, 0x0a, 0x70, 0x72, 0x6f, 0x64, 0x75, 0x63, 0x65],
+        &[
+            0x53, 0x45, 0x4e, 0x44, 0x0a, 0x0a, 0x70, 0x72, 0x6f, 0x64, 0x75, 0x63, 0x65, 0x72,
+            0x2d, 0x30,
+        ],
+        &[
+            0x53, 0x45, 0x4e, 0x44, 0x0a, 0x0a, 0x70, 0x72, 0x6f, 0x64, 0x75, 0x63, 0x65,
+        ],
         &[0x2d, 0x6d],
         &[0x72, 0x2d, 0x32, 0x2d, 0x6d, 0x73, 0x67, 0x2d, 0x30, 0x00],
         &[0x73, 0x67, 0x2d, 0x31, 0x00],
         &[0x53, 0x45, 0x4e],
-        &[0x53, 0x45, 0x4e, 0x44, 0x0a, 0x0a, 0x70, 0x72, 0x6f, 0x64, 0x75, 0x63, 0x65, 0x72, 0x2d, 0x30],
+        &[
+            0x53, 0x45, 0x4e, 0x44, 0x0a, 0x0a, 0x70, 0x72, 0x6f, 0x64, 0x75, 0x63, 0x65, 0x72,
+            0x2d, 0x30,
+        ],
     ];
 
     // Compute expected frames by counting NUL bytes in concatenation
@@ -45,7 +56,7 @@ fn replay_problematic_chunk_sequence() {
                     decoded += 1;
                     bodies.push(f.body);
                 }
-                Ok(Some(StompItem::Heartbeat)) => {},
+                Ok(Some(StompItem::Heartbeat)) => {}
                 Ok(None) => break,
                 Err(e) => panic!("decoder returned error on replayed chunks: {}", e),
             }
@@ -56,7 +67,7 @@ fn replay_problematic_chunk_sequence() {
     loop {
         match dec.decode(&mut buf) {
             Ok(Some(StompItem::Frame(_))) => decoded += 1,
-            Ok(Some(StompItem::Heartbeat)) => {},
+            Ok(Some(StompItem::Heartbeat)) => {}
             Ok(None) => break,
             Err(e) => panic!("decoder returned error during drain: {}", e),
         }
@@ -64,10 +75,28 @@ fn replay_problematic_chunk_sequence() {
 
     if decoded != expected {
         eprintln!("combined (len={}): {:02x?}", combined.len(), &combined);
-        let nul_positions: Vec<usize> = combined.iter().enumerate().filter_map(|(i,&b)| if b==0 {Some(i)} else {None}).collect();
+        let nul_positions: Vec<usize> = combined
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &b)| if b == 0 { Some(i) } else { None })
+            .collect();
         eprintln!("nul positions: {:?}", nul_positions);
-        eprintln!("decoded bodies ({}): {:?}", bodies.len(), bodies.iter().map(|b| String::from_utf8_lossy(b).to_string()).collect::<Vec<_>>());
-        eprintln!("remaining buf after drain (len={}): {:02x?}", buf.len(), &buf);
-        panic!("decoded frames mismatch (decoded={}, expected={})", decoded, expected);
+        eprintln!(
+            "decoded bodies ({}): {:?}",
+            bodies.len(),
+            bodies
+                .iter()
+                .map(|b| String::from_utf8_lossy(b).to_string())
+                .collect::<Vec<_>>()
+        );
+        eprintln!(
+            "remaining buf after drain (len={}): {:02x?}",
+            buf.len(),
+            &buf
+        );
+        panic!(
+            "decoded frames mismatch (decoded={}, expected={})",
+            decoded, expected
+        );
     }
 }

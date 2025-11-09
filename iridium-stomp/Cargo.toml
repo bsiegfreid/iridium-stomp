@@ -19,6 +19,8 @@ tokio-util = { version = "0.7", features = ["codec"] }
 futures = "0.3"
 thiserror = "1"
 tracing = "0.1"
+# winnow removed: parser implemented as a small slice-based parser in `src/parser.rs`
+## If you want to reintroduce a parser-combinator later, add a compatible winnow version here.
 
 [dev-dependencies]
 rand = "0.8"
