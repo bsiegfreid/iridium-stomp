@@ -45,7 +45,8 @@ Check status and logs:
 
 ```bash
 docker compose ps
-```markdown
+```
+
 Contributing
 ============
 
