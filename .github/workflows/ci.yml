@@ -44,9 +44,8 @@ jobs:
           override: true
 
       - name: Run Rust smoke test
-        working-directory: iridium-stomp
         run: |
-          cargo test --test stomp_smoke -- --nocapture
+          cargo test --manifest-path ./iridium-stomp/Cargo.toml --test stomp_smoke -- --nocapture
 
       - name: Dump RabbitMQ logs (for debugging)
         if: failure()
@@ -73,10 +72,9 @@ jobs:
           override: true
 
       - name: Check formatting (cargo fmt)
-        working-directory: iridium-stomp
         run: |
           rustup component add rustfmt || true
-          cargo fmt --all -- --check
+          cargo fmt --manifest-path ./iridium-stomp/Cargo.toml --all -- --check
 
   clippy:
     name: Clippy
@@ -93,10 +91,9 @@ jobs:
           override: true
 
       - name: Run clippy
-        working-directory: iridium-stomp
         run: |
           rustup component add clippy || true
-          cargo clippy --all-targets --all-features -- -D warnings
+          cargo clippy --manifest-path ./iridium-stomp/Cargo.toml --all-targets --all-features -- -D warnings
 
   unit-tests:
     name: Unit tests
@@ -116,9 +113,8 @@ jobs:
           override: true
 
       - name: Run unit tests
-        working-directory: iridium-stomp
         run: |
-          cargo test --lib --verbose
+          cargo test --manifest-path ./iridium-stomp/Cargo.toml --lib --verbose
 
   build-examples:
     name: Build examples
@@ -136,5 +132,4 @@ jobs:
           override: true
 
       - name: Build examples (crate)
-        working-directory: iridium-stomp
-        run: cargo build --examples --verbose
+        run: cargo build --manifest-path ./iridium-stomp/Cargo.toml --examples --verbose
