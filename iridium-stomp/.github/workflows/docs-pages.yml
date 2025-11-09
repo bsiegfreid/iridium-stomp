@@ -2,7 +2,9 @@ name: Build & Publish docs
 
 on:
   push:
-    branches: [ main, 'refs/heads/*' ]
+    # Only publish docs when the `main` branch receives a push.
+    branches: [ main ]
+  # Allow manual runs from the Actions UI for previewing docs from other branches.
   workflow_dispatch: {}
 
 permissions:
