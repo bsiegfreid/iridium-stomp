@@ -12,17 +12,6 @@ type Headers = Vec<(String, String)>;
 /// Parse the raw header block from a STOMP frame and extract an optional
 /// `content-length` header.
 ///
-/// The `header_slice` should contain the bytes between the command's
-/// terminating LF and the blank-line separator that precedes the body.
-/// Returns a vector of `(key, value)` headers and `Some(content_length)` if
-/// a `content-length` header was present and parsed successfully.
-///
-/// Errors returned are I/O errors with `InvalidData` when header keys/values
-/// are not valid UTF-8 or when `content-length` is not a valid non-negative
-/// integer.
-/// Parse the raw header block from a STOMP frame and extract an optional
-/// `content-length` header.
-///
 /// Parameters
 /// - `header_slice`: the bytes between the command's terminating LF and the
 ///   blank-line separator that precedes the body. This slice may be empty.
