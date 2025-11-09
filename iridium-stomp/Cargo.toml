@@ -9,6 +9,11 @@ repository = "https://github.com/bsiegfreid/iridium-stomp"
 homepage = "https://github.com/bsiegfreid/iridium-stomp"
 documentation = "https://docs.rs/iridium-stomp"
 keywords = ["stomp"]
+# Ensure docs files are packaged and instruct docs.rs to build with all features
+include = ["src/**", "Cargo.toml", "README.md", "LICENSE", "docs/**"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [dependencies]
 
@@ -19,3 +24,8 @@ tokio-util = { version = "0.7", features = ["codec"] }
 futures = "0.3"
 thiserror = "1"
 tracing = "0.1"
+# winnow removed: parser implemented as a small slice-based parser in `src/parser.rs`
+## If you want to reintroduce a parser-combinator later, add a compatible winnow version here.
+
+[dev-dependencies]
+rand = "0.8"

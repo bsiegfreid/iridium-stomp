@@ -1,3 +1,4 @@
+use std::env;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::thread::sleep;
@@ -5,6 +6,15 @@ use std::time::{Duration, Instant};
 
 #[test]
 fn stomp_smoke_connects() -> Result<(), Box<dyn std::error::Error>> {
+    // Skip this smoke test unless explicitly enabled. Running an actual
+    // broker is an external dependency and many runners (CI/local) won't
+    // have one available by default. Set the environment variable
+    // `RUN_STOMP_SMOKE=1` to enable this test.
+    if env::var("RUN_STOMP_SMOKE").is_err() {
+        eprintln!("skipping stomp_smoke_connects: RUN_STOMP_SMOKE not set");
+        return Ok(());
+    }
+
     // Try to connect for a short timeout in case the test runner starts before the container.
     let addr = "127.0.0.1:61613";
     let start = Instant::now();

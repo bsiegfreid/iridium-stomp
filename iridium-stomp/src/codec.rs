@@ -3,66 +3,10 @@ use std::io;
 use tokio_util::codec::{Decoder, Encoder};
 
 use crate::frame::Frame;
+use crate::parser::parse_frame_slice;
 
-/// Alias for the collection used to represent STOMP headers.
-///
-/// Each header is a (key, value) pair using owned `String`s.
-type Headers = Vec<(String, String)>;
-
-/// Parse the raw header block from a STOMP frame and extract an optional
-/// `content-length` header.
-///
-/// Parameters
-/// - `header_slice`: the bytes between the command's terminating LF and the
-///   blank-line separator that precedes the body. This slice may be empty.
-///
-/// Returns
-/// - `Ok((headers, Some(content_length)))` when a `content-length` header was
-///   present and parsed successfully.
-/// - `Ok((headers, None))` when no `content-length` header was present.
-/// - `Err(io::Error)` with `InvalidData` when header keys/values are not valid
-///   UTF-8 or when `content-length` is not a valid non-negative integer.
-fn parse_headers(header_slice: &[u8]) -> Result<(Headers, Option<usize>), io::Error> {
-    let mut headers: Headers = Vec::new();
-    let mut content_length: Option<usize> = None;
-
-    if header_slice.is_empty() {
-        return Ok((headers, content_length));
-    }
-
-    for line in header_slice.split(|&b| b == b'\n') {
-        if line.is_empty() {
-            continue;
-        }
-        if let Some(colon_pos) = line.iter().position(|&b| b == b':') {
-            let k = String::from_utf8(line[..colon_pos].to_vec()).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("invalid utf8 in header key: {}", e),
-                )
-            })?;
-            let v = String::from_utf8(line[colon_pos + 1..].to_vec()).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("invalid utf8 in header value: {}", e),
-                )
-            })?;
-            if k.to_lowercase() == "content-length" {
-                let parsed = v.trim().parse::<usize>().map_err(|_| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("invalid content-length value: {}", v),
-                    )
-                })?;
-                content_length = Some(parsed);
-            }
-            headers.push((k, v));
-        }
-    }
-
-    Ok((headers, content_length))
-}
-
+/// (parser-based implementation uses `src` directly; header parsing is
+/// delegated to the `parser` module.)
 /// Items produced or consumed by the codec.
 ///
 /// A `StompItem` is either a decoded `Frame` or a `Heartbeat` marker
@@ -84,7 +28,9 @@ pub enum StompItem {
 ///   header (STOMP 1.2) for binary bodies containing NUL bytes.
 /// - Encode `StompItem` back into bytes for the wire format and emit
 ///   `content-length` when necessary.
-pub struct StompCodec {}
+pub struct StompCodec {
+    // No internal buffer: we parse directly from the provided `src` buffer
+}
 
 impl StompCodec {
     pub fn new() -> Self {
@@ -117,111 +63,61 @@ impl Decoder for StompCodec {
     /// - `Err(io::Error)` on protocol or data errors (invalid UTF-8, malformed
     ///   frames, missing NUL after a content-length body, etc.).
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        // Heartbeat (single LF)
-        if !src.is_empty() && src[0] == b'\n' {
+        // Move any newly-received bytes from the provided `src` into our
+        // internal buffer. We keep a separate buffer so parsing can proceed
+        // across arbitrary chunk boundaries without relying on indexes into
+        // heartbeat: single LF
+        if let Some(&b'\n') = src.chunk().first() {
             src.advance(1);
             return Ok(Some(StompItem::Heartbeat));
         }
 
-        let buf = src.as_ref();
-        let sep = b"\n\n";
+        let chunk = src.chunk();
+        match parse_frame_slice(chunk) {
+            Ok(Some((cmd_bytes, headers, body, consumed))) => {
+                // advance src by consumed
+                src.advance(consumed);
 
-        // Need header/body separator to parse headers
-        let sep_pos = match buf.windows(sep.len()).position(|w| w == sep) {
-            Some(p) => p,
-            None => return Ok(None),
-        };
+                // build owned Frame
+                let command = String::from_utf8(cmd_bytes).map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("invalid utf8 in command: {}", e),
+                    )
+                })?;
+                // convert headers Vec<(Vec<u8>,Vec<u8>)> -> Vec<(String,String)>
+                let mut hdrs: Vec<(String, String)> = Vec::new();
+                for (k, v) in headers {
+                    let ks = String::from_utf8(k).map_err(|e| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("invalid utf8 in header key: {}", e),
+                        )
+                    })?;
+                    let vs = String::from_utf8(v).map_err(|e| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("invalid utf8 in header value: {}", e),
+                        )
+                    })?;
+                    hdrs.push((ks, vs));
+                }
 
-        let command_end = buf.iter().position(|&b| b == b'\n').unwrap_or(buf.len());
-        let header_start = if command_end < buf.len() {
-            command_end + 1
-        } else {
-            command_end
-        };
-        let header_slice = if sep_pos > header_start {
-            &buf[header_start..sep_pos]
-        } else {
-            &[][..]
-        };
+                let body = body.unwrap_or_default();
 
-        // Parse headers and detect an optional `content-length` header.
-        let (headers, content_length) = parse_headers(header_slice)?;
-
-        if let Some(clen) = content_length {
-            let needed = sep_pos + sep.len() + clen + 1;
-            if buf.len() < needed {
-                return Ok(None);
+                let frame = Frame {
+                    command,
+                    headers: hdrs,
+                    body,
+                };
+                Ok(Some(StompItem::Frame(frame)))
             }
-            let nul_pos = sep_pos + sep.len() + clen;
-            if buf[nul_pos] != 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "missing NUL after content-length body",
-                ));
-            }
-
-            let frame_bytes = src.split_to(nul_pos);
-            src.advance(1);
-
-            let raw = frame_bytes.to_vec();
-            if raw.is_empty() {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "empty frame"));
-            }
-
-            let cmd_end = raw.iter().position(|&b| b == b'\n').unwrap_or(raw.len());
-            let command = String::from_utf8(raw[..cmd_end].to_vec()).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("invalid utf8 in command: {}", e),
-                )
-            })?;
-
-            let body_start = sep_pos + sep.len();
-            let body = raw[body_start..].to_vec();
-
-            let frame = Frame {
-                command,
-                headers,
-                body,
-            };
-            return Ok(Some(StompItem::Frame(frame)));
+            Ok(None) => Ok(None),
+            Err(e) => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("parse error: {}", e),
+            )),
         }
-
-        // fallback: NUL-terminated
-        if let Some(nul_pos) = buf.iter().position(|&b| b == 0) {
-            let frame_bytes = src.split_to(nul_pos);
-            src.advance(1);
-
-            let raw = frame_bytes.to_vec();
-            if raw.is_empty() {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "empty frame"));
-            }
-
-            let cmd_end = raw.iter().position(|&b| b == b'\n').unwrap_or(raw.len());
-            let command = String::from_utf8(raw[..cmd_end].to_vec()).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("invalid utf8 in command: {}", e),
-                )
-            })?;
-
-            let header_slice = if sep_pos > cmd_end + 1 {
-                &raw[cmd_end + 1..sep_pos]
-            } else {
-                &[][..]
-            };
-            let (headers, _cl) = parse_headers(header_slice)?;
-            let body = raw[sep_pos + sep.len()..].to_vec();
-
-            let frame = Frame {
-                command,
-                headers,
-                body,
-            };
-            return Ok(Some(StompItem::Frame(frame)));
-        }
-
-        Ok(None)
     }
 }
 
