@@ -16,7 +16,10 @@ fn partial_frame_decoding() {
 
     // feed the rest
     buf.extend_from_slice(&raw[10..]);
-    let r2 = codec.decode(&mut buf).expect("decode failed").expect("no item");
+    let r2 = codec
+        .decode(&mut buf)
+        .expect("decode failed")
+        .expect("no item");
     match r2 {
         StompItem::Frame(f) => assert_eq!(f.body, b"hello world".to_vec()),
         _ => panic!("expected frame"),
@@ -29,13 +32,20 @@ fn large_content_length_roundtrip() {
     // large body (10k 'x')
     let body = vec![b'x'; 10_000];
     let mut frame = Frame::new("SEND");
-    frame = frame.header("content-length", &body.len().to_string()).set_body(body.clone());
+    frame = frame
+        .header("content-length", body.len().to_string())
+        .set_body(body.clone());
 
     let mut dst = BytesMut::new();
-    codec.encode(StompItem::Frame(frame), &mut dst).expect("encode failed");
+    codec
+        .encode(StompItem::Frame(frame), &mut dst)
+        .expect("encode failed");
 
     let mut dec = StompCodec::new();
-    let item = dec.decode(&mut dst).expect("decode failed").expect("no item");
+    let item = dec
+        .decode(&mut dst)
+        .expect("decode failed")
+        .expect("no item");
     match item {
         StompItem::Frame(f) => assert_eq!(f.body, body),
         _ => panic!("expected frame"),
@@ -57,7 +67,13 @@ fn encode_no_content_length_for_utf8_body() {
     let mut codec = StompCodec::new();
     let frame = Frame::new("SEND").set_body(b"hello".to_vec());
     let mut dst = BytesMut::new();
-    codec.encode(StompItem::Frame(frame), &mut dst).expect("encode failed");
+    codec
+        .encode(StompItem::Frame(frame), &mut dst)
+        .expect("encode failed");
     let s = String::from_utf8_lossy(&dst);
-    assert!(!s.contains("content-length:"), "unexpected content-length header for utf8 body: {}", s);
+    assert!(
+        !s.contains("content-length:"),
+        "unexpected content-length header for utf8 body: {}",
+        s
+    );
 }

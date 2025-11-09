@@ -685,7 +685,11 @@ mod tests {
     use tokio::sync::mpsc;
 
     // Helper to build a MESSAGE frame with given message-id and subscription/destination headers
-    fn make_message(message_id: &str, subscription: Option<&str>, destination: Option<&str>) -> Frame {
+    fn make_message(
+        message_id: &str,
+        subscription: Option<&str>,
+        destination: Option<&str>,
+    ) -> Frame {
         let mut f = Frame::new("MESSAGE");
         f = f.header("message-id", message_id);
         if let Some(s) = subscription {
@@ -727,9 +731,18 @@ mod tests {
         {
             let mut p = pending.lock().await;
             let mut q = VecDeque::new();
-            q.push_back(("m1".to_string(), make_message("m1", Some("s1"), Some("/queue/x"))));
-            q.push_back(("m2".to_string(), make_message("m2", Some("s1"), Some("/queue/x"))));
-            q.push_back(("m3".to_string(), make_message("m3", Some("s1"), Some("/queue/x"))));
+            q.push_back((
+                "m1".to_string(),
+                make_message("m1", Some("s1"), Some("/queue/x")),
+            ));
+            q.push_back((
+                "m2".to_string(),
+                make_message("m2", Some("s1"), Some("/queue/x")),
+            ));
+            q.push_back((
+                "m3".to_string(),
+                make_message("m3", Some("s1"), Some("/queue/x")),
+            ));
             p.insert("s1".to_string(), q);
         }
 
@@ -794,9 +807,18 @@ mod tests {
         {
             let mut p = pending.lock().await;
             let mut q = VecDeque::new();
-            q.push_back(("a".to_string(), make_message("a", Some("s2"), Some("/queue/y"))));
-            q.push_back(("b".to_string(), make_message("b", Some("s2"), Some("/queue/y"))));
-            q.push_back(("c".to_string(), make_message("c", Some("s2"), Some("/queue/y"))));
+            q.push_back((
+                "a".to_string(),
+                make_message("a", Some("s2"), Some("/queue/y")),
+            ));
+            q.push_back((
+                "b".to_string(),
+                make_message("b", Some("s2"), Some("/queue/y")),
+            ));
+            q.push_back((
+                "c".to_string(),
+                make_message("c", Some("s2"), Some("/queue/y")),
+            ));
             p.insert("s2".to_string(), q);
         }
 

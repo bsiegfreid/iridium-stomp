@@ -12,11 +12,15 @@ fn byte_by_byte_content_length() {
 
     let mut buf = BytesMut::new();
     for i in 0..raw.len() {
-        buf.extend_from_slice(&raw[i..i+1]);
+        buf.extend_from_slice(&raw[i..i + 1]);
         let res = codec.decode(&mut buf).expect("decode failed");
         if i < raw.len() - 1 {
             // until the last byte (NUL) we should not have a full item
-            assert!(res.is_none(), "decoder produced item too early at byte {}", i);
+            assert!(
+                res.is_none(),
+                "decoder produced item too early at byte {}",
+                i
+            );
         } else {
             // final byte should produce a frame
             let item = res.expect("expected item after final byte");
@@ -42,7 +46,11 @@ fn small_chunk_null_terminated() {
         buf.extend_from_slice(&raw[offset..end]);
         let res = codec.decode(&mut buf).expect("decode failed");
         if end < raw.len() {
-            assert!(res.is_none(), "decoder produced item too early at offset {}", end);
+            assert!(
+                res.is_none(),
+                "decoder produced item too early at offset {}",
+                end
+            );
         } else {
             let item = res.expect("expected item after final chunk");
             match item {

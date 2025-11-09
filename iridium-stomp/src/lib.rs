@@ -14,6 +14,7 @@
 pub mod codec;
 pub mod connection;
 pub mod frame;
+pub mod parser;
 
 /// Re-export the codec types (`StompCodec`, `StompItem`) for easy use with
 /// `tokio_util::codec::Framed` and tests.

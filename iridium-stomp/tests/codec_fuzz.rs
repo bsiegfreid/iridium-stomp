@@ -1,8 +1,8 @@
 use bytes::BytesMut;
 use iridium_stomp::codec::{StompCodec, StompItem};
 use iridium_stomp::frame::Frame;
-use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use tokio_util::codec::{Decoder, Encoder};
 
 /// Encode several frames and feed them to the decoder split into random
@@ -21,7 +21,9 @@ fn randomized_splits_multiple_frames() {
     // Encode them back-to-back into a single buffer
     let mut encoded = BytesMut::new();
     for f in frames.iter().cloned() {
-        codec.encode(StompItem::Frame(f), &mut encoded).expect("encode");
+        codec
+            .encode(StompItem::Frame(f), &mut encoded)
+            .expect("encode");
     }
 
     // Deterministic RNG
@@ -48,7 +50,11 @@ fn randomized_splits_multiple_frames() {
                 Ok(Some(StompItem::Frame(f))) => {
                     // basic sanity: bodies should match one of the original
                     let b = f.body.clone();
-                    assert!(b == b"alpha".to_vec() || b == b"omega".to_vec() || b == vec![0u8,1,2,3,4]);
+                    assert!(
+                        b == b"alpha".to_vec()
+                            || b == b"omega".to_vec()
+                            || b == vec![0u8, 1, 2, 3, 4]
+                    );
                     decoded_count += 1;
                 }
                 Ok(Some(StompItem::Heartbeat)) => { /* ignore */ }
@@ -70,7 +76,9 @@ fn streaming_many_small_frames() {
     for i in 0..200 {
         let body = format!("msg-{}", i).into_bytes();
         let f = Frame::new("SEND").set_body(body);
-        codec.encode(StompItem::Frame(f), &mut encoded).expect("encode");
+        codec
+            .encode(StompItem::Frame(f), &mut encoded)
+            .expect("encode");
     }
 
     let mut rng = StdRng::from_seed([0x99; 32]);
@@ -93,7 +101,7 @@ fn streaming_many_small_frames() {
         loop {
             match dec.decode(&mut feed) {
                 Ok(Some(StompItem::Frame(_f))) => decoded += 1,
-                Ok(Some(StompItem::Heartbeat)) => {},
+                Ok(Some(StompItem::Heartbeat)) => {}
                 Ok(None) => break,
                 Err(e) => panic!("decoder error: {}", e),
             }
