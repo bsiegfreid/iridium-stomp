@@ -2,6 +2,24 @@ use crate::connection::ConnError;
 use crate::frame::Frame;
 use crate::connection::Connection;
 use tokio::sync::mpsc;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use futures::stream::Stream;
+
+/// Options to configure a subscription. `headers` are forwarded to the
+/// broker as-is when sending the SUBSCRIBE frame and persisted locally so
+/// they can be re-sent on reconnect. This allows broker-specific durable
+/// subscription extensions to be used (for example ActiveMQ's durable
+/// subscription headers) while keeping the library generic.
+#[derive(Debug, Clone, Default)]
+pub struct SubscriptionOptions {
+    /// Extra headers to include on the SUBSCRIBE frame.
+    pub headers: Vec<(String, String)>,
+
+    /// Optional named queue to subscribe to (convenience; typically you can
+    /// just put this in the `destination` argument). Kept for clarity.
+    pub durable_queue: Option<String>,
+}
 
 /// A lightweight handle returned from `Connection::subscribe` that packages the
 /// subscription id, destination, and the receiving side of the subscription.
@@ -46,5 +64,25 @@ impl Subscription {
     /// Negative-acknowledge a message by its `message-id` header.
     pub async fn nack(&self, message_id: &str) -> Result<(), ConnError> {
         self.conn.nack(&self.id, message_id).await
+    }
+
+    /// Consume the subscription and unsubscribe from the server.
+    ///
+    /// This is a convenience that calls `Connection::unsubscribe` with the
+    /// local subscription id and drops the receiver.
+    pub async fn unsubscribe(self) -> Result<(), ConnError> {
+        self.conn.unsubscribe(&self.id).await
+    }
+}
+
+impl Stream for Subscription {
+    type Item = Frame;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // Safe to get a mutable reference because all fields of `Subscription`
+        // are `Unpin` (String, Receiver, Connection). We then delegate to the
+        // tokio mpsc receiver's `poll_recv` which returns `Poll<Option<T>>`.
+        let this = self.get_mut();
+        Pin::new(&mut this.receiver).poll_recv(cx)
     }
 }

@@ -27,6 +27,7 @@ pub use connection::{Connection, negotiate_heartbeats, parse_heartbeat_header};
 /// Re-export the `Frame` type used to construct/send and receive frames.
 pub use frame::Frame;
 pub use subscription::Subscription;
+pub use subscription::SubscriptionOptions;
 
 #[cfg(test)]
 mod tests {
