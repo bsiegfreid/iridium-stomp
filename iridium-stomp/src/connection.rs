@@ -243,29 +243,29 @@ impl Connection {
         })
     }
 
+    /// Send a frame to the background writer task.
+    ///
+    /// Parameters
+    /// - `frame`: ownership of the `Frame` to send. The frame is converted
+    ///   into a `StompItem::Frame` and sent over the internal mpsc channel.
     pub async fn send_frame(&self, frame: Frame) -> Result<(), ConnError> {
-        // Send a frame to the background writer task.
-        //
-        // Parameters
-        // - `frame`: ownership of the `Frame` to send. The frame is converted
-        //   into a `StompItem::Frame` and sent over the internal mpsc channel.
         self.outbound_tx
             .send(StompItem::Frame(frame))
             .await
             .map_err(|_| ConnError::Protocol("send channel closed".into()))
     }
 
+    /// Receive the next inbound `Frame` produced by the background reader
+    /// task. Returns `Some(Frame)` when available or `None` if the inbound
+    /// channel has been closed.
     pub async fn next_frame(&mut self) -> Option<Frame> {
-        // Receive the next inbound `Frame` produced by the background reader
-        // task. Returns `Some(Frame)` when available or `None` if the inbound
-        // channel has been closed.
         self.inbound_rx.recv().await
     }
 
+    /// Signal the background task to shutdown by broadcasting on the
+    /// shutdown channel. Consumers may await task termination separately
+    /// if needed.
     pub async fn close(self) {
-        // Signal the background task to shutdown by broadcasting on the
-        // shutdown channel. Consumers may await task termination separately
-        // if needed.
         let _ = self.shutdown_tx.send(());
     }
 }
