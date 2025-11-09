@@ -27,6 +27,13 @@ jobs:
         run: |
           rustup component add rustfmt clippy
 
+      - name: Debug: verify crate for docs
+        working-directory: ./iridium-stomp
+        run: |
+          echo "PWD: $(pwd)"
+          ls -la
+          test -f Cargo.toml && echo "Cargo.toml exists" || echo "Cargo.toml missing"
+
       - name: Build docs
         working-directory: ./iridium-stomp
         run: |

@@ -29,6 +29,13 @@ jobs:
         run: |
           rustup component add rustfmt clippy
 
+      - name: Debug: verify crate for docs (nested)
+        working-directory: .
+        run: |
+          echo "PWD: $(pwd)"
+          ls -la
+          test -f Cargo.toml && echo "Cargo.toml exists" || echo "Cargo.toml missing"
+
       - name: Build docs
         # run from the crate directory so the Cargo.toml is found without an explicit path
         working-directory: .
