@@ -2,9 +2,7 @@ name: Build & Publish docs
 
 on:
   push:
-    # Only publish docs when the `main` branch receives a push.
     branches: [ main ]
-  # Allow manual runs from the Actions UI for previewing docs from other branches.
   workflow_dispatch: {}
 
 permissions:
@@ -29,9 +27,17 @@ jobs:
         run: |
           rustup component add rustfmt clippy
 
-      - name: Build docs
+      - name: Debug: verify crate for docs
+        working-directory: ./iridium-stomp
         run: |
-          cargo doc --no-deps --workspace
+          echo "PWD: $(pwd)"
+          ls -la
+          test -f Cargo.toml && echo "Cargo.toml exists" || echo "Cargo.toml missing"
+
+      - name: Build docs
+        working-directory: ./iridium-stomp
+        run: |
+          cargo doc --no-deps
 
       - name: Publish to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
@@ -39,5 +45,3 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./target/doc
           keep_files: false
-          # optional: user can configure cname or publish_branch
-
