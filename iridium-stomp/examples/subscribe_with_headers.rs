@@ -1,6 +1,6 @@
-use iridium_stomp::connection::AckMode;
-use iridium_stomp::Connection;
 use futures::StreamExt;
+use iridium_stomp::Connection;
+use iridium_stomp::connection::AckMode;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

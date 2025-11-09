@@ -163,13 +163,13 @@ impl Connection {
         passcode: &str,
         client_hb: &str,
     ) -> Result<Self, ConnError> {
-    let (out_tx, mut out_rx) = mpsc::channel::<StompItem>(32);
-    let (in_tx, in_rx) = mpsc::channel::<Frame>(32);
+        let (out_tx, mut out_rx) = mpsc::channel::<StompItem>(32);
+        let (in_tx, in_rx) = mpsc::channel::<Frame>(32);
         let subscriptions: Arc<Mutex<Subscriptions>> = Arc::new(Mutex::new(HashMap::new()));
         let sub_id_counter = Arc::new(AtomicU64::new(1));
         let (shutdown_tx, _) = broadcast::channel::<()>(1);
-    let pending: Arc<Mutex<PendingMap>> = Arc::new(Mutex::new(HashMap::new()));
-    let pending_clone = pending.clone();
+        let pending: Arc<Mutex<PendingMap>> = Arc::new(Mutex::new(HashMap::new()));
+        let pending_clone = pending.clone();
 
         let addr = addr.to_string();
         let login = login.to_string();
@@ -502,7 +502,12 @@ impl Connection {
             .await
             .map_err(|_| ConnError::Protocol("send channel closed".into()))?;
 
-        Ok(crate::subscription::Subscription::new(id, destination.to_string(), rx, self.clone()))
+        Ok(crate::subscription::Subscription::new(
+            id,
+            destination.to_string(),
+            rx,
+            self.clone(),
+        ))
     }
 
     /// Convenience wrapper without extra headers.
@@ -511,7 +516,8 @@ impl Connection {
         destination: &str,
         ack: AckMode,
     ) -> Result<crate::subscription::Subscription, ConnError> {
-        self.subscribe_with_headers(destination, ack, Vec::new()).await
+        self.subscribe_with_headers(destination, ack, Vec::new())
+            .await
     }
 
     /// Subscribe with a typed `SubscriptionOptions` structure.
@@ -525,8 +531,13 @@ impl Connection {
         ack: AckMode,
         options: crate::subscription::SubscriptionOptions,
     ) -> Result<crate::subscription::Subscription, ConnError> {
-        let dest = options.durable_queue.as_deref().unwrap_or(destination).to_string();
-        self.subscribe_with_headers(&dest, ack, options.headers).await
+        let dest = options
+            .durable_queue
+            .as_deref()
+            .unwrap_or(destination)
+            .to_string();
+        self.subscribe_with_headers(&dest, ack, options.headers)
+            .await
     }
 
     /// Unsubscribe a previously created subscription by its local subscription id.
@@ -990,10 +1001,10 @@ mod tests {
 
         let sub_id = subscription.id().to_string();
 
-    // drain any initial outbound frames (SUBSCRIBE) emitted by subscribe()
-    while out_rx.try_recv().is_ok() {}
+        // drain any initial outbound frames (SUBSCRIBE) emitted by subscribe()
+        while out_rx.try_recv().is_ok() {}
 
-    // populate pending queue for this subscription
+        // populate pending queue for this subscription
         {
             let mut p = conn.pending.lock().await;
             let mut q = VecDeque::new();
