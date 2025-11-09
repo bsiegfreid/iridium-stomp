@@ -170,6 +170,6 @@ Next steps and recommendations
 
 References
 ----------
-- RabbitMQ documentation: https://www.rabbitmq.com/ (see "exchanges, queues and bindings")
+- RabbitMQ documentation: <https://www.rabbitmq.com/> (see "exchanges, queues and bindings")
 - ActiveMQ STOMP docs: consult the ActiveMQ documentation for the version you run for exact header names and durable subscription behavior.
 
