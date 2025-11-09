@@ -15,6 +15,7 @@ pub mod codec;
 pub mod connection;
 pub mod frame;
 pub mod parser;
+pub mod subscription;
 
 /// Re-export the codec types (`StompCodec`, `StompItem`) for easy use with
 /// `tokio_util::codec::Framed` and tests.
@@ -25,6 +26,7 @@ pub use connection::{Connection, negotiate_heartbeats, parse_heartbeat_header};
 
 /// Re-export the `Frame` type used to construct/send and receive frames.
 pub use frame::Frame;
+pub use subscription::Subscription;
 
 #[cfg(test)]
 mod tests {

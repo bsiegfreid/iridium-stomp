@@ -13,18 +13,18 @@ use crate::frame::Frame;
 
 /// Internal subscription entry stored for each destination.
 #[derive(Clone)]
-struct SubscriptionEntry {
-    id: String,
-    sender: mpsc::Sender<Frame>,
-    ack: String,
+pub(crate) struct SubscriptionEntry {
+    pub(crate) id: String,
+    pub(crate) sender: mpsc::Sender<Frame>,
+    pub(crate) ack: String,
 }
 
-/// Internal alias for the subscription dispatch map: destination -> list of
+/// Alias for the subscription dispatch map: destination -> list of
 /// `SubscriptionEntry`.
-type Subscriptions = HashMap<String, Vec<SubscriptionEntry>>;
+pub(crate) type Subscriptions = HashMap<String, Vec<SubscriptionEntry>>;
 
-/// Internal alias for the pending map: subscription_id -> queue of (message-id, Frame).
-type PendingMap = HashMap<String, VecDeque<(String, Frame)>>;
+/// Alias for the pending map: subscription_id -> queue of (message-id, Frame).
+pub(crate) type PendingMap = HashMap<String, VecDeque<(String, Frame)>>;
 
 /// Errors returned by `Connection` operations.
 #[derive(Error, Debug)]
@@ -117,9 +117,12 @@ pub fn negotiate_heartbeats(
 /// The `Connection` spawns a background task that maintains the TCP transport,
 /// sends/receives STOMP frames using `StompCodec`, negotiates heartbeats, and
 /// performs simple reconnect logic with exponential backoff.
+#[derive(Clone)]
 pub struct Connection {
     outbound_tx: mpsc::Sender<StompItem>,
-    inbound_rx: mpsc::Receiver<Frame>,
+    /// The inbound receiver is shared behind a mutex so the `Connection`
+    /// handle may be cloned and callers can call `next_frame` concurrently.
+    inbound_rx: Arc<Mutex<mpsc::Receiver<Frame>>>,
     shutdown_tx: broadcast::Sender<()>,
     /// Map of destination -> list of (subscription id, sender) for dispatching
     /// inbound MESSAGE frames to subscribers.
@@ -156,13 +159,13 @@ impl Connection {
         passcode: &str,
         client_hb: &str,
     ) -> Result<Self, ConnError> {
-        let (out_tx, mut out_rx) = mpsc::channel::<StompItem>(32);
-        let (in_tx, in_rx) = mpsc::channel::<Frame>(32);
+    let (out_tx, mut out_rx) = mpsc::channel::<StompItem>(32);
+    let (in_tx, in_rx) = mpsc::channel::<Frame>(32);
         let subscriptions: Arc<Mutex<Subscriptions>> = Arc::new(Mutex::new(HashMap::new()));
         let sub_id_counter = Arc::new(AtomicU64::new(1));
         let (shutdown_tx, _) = broadcast::channel::<()>(1);
-        let pending: Arc<Mutex<PendingMap>> = Arc::new(Mutex::new(HashMap::new()));
-        let pending_clone = pending.clone();
+    let pending: Arc<Mutex<PendingMap>> = Arc::new(Mutex::new(HashMap::new()));
+    let pending_clone = pending.clone();
 
         let addr = addr.to_string();
         let login = login.to_string();
@@ -416,7 +419,7 @@ impl Connection {
 
         Ok(Connection {
             outbound_tx: out_tx,
-            inbound_rx: in_rx,
+            inbound_rx: Arc::new(Mutex::new(in_rx)),
             shutdown_tx,
             subscriptions,
             sub_id_counter,
@@ -450,7 +453,7 @@ impl Connection {
         &self,
         destination: &str,
         ack: AckMode,
-    ) -> Result<(String, mpsc::Receiver<Frame>), ConnError> {
+    ) -> Result<crate::subscription::Subscription, ConnError> {
         let id = self
             .sub_id_counter
             .fetch_add(1, Ordering::SeqCst)
@@ -477,7 +480,7 @@ impl Connection {
             .await
             .map_err(|_| ConnError::Protocol("send channel closed".into()))?;
 
-        Ok((id, rx))
+        Ok(crate::subscription::Subscription::new(id, destination.to_string(), rx, self.clone()))
     }
 
     /// Unsubscribe a previously created subscription by its local subscription id.
@@ -656,11 +659,13 @@ impl Connection {
         Ok(())
     }
 
-    pub async fn next_frame(&mut self) -> Option<Frame> {
+    pub async fn next_frame(&self) -> Option<Frame> {
         // Receive the next inbound `Frame` produced by the background reader
         // task. Returns `Some(Frame)` when available or `None` if the inbound
-        // channel has been closed.
-        self.inbound_rx.recv().await
+        // channel has been closed. We lock the receiver so cloned handles can
+        // safely await concurrently (they serialize on the mutex).
+        let mut rx = self.inbound_rx.lock().await;
+        rx.recv().await
     }
 
     pub async fn close(self) {
@@ -748,7 +753,7 @@ mod tests {
 
         let conn = Connection {
             outbound_tx: out_tx,
-            inbound_rx: in_rx,
+            inbound_rx: Arc::new(Mutex::new(in_rx)),
             shutdown_tx,
             subscriptions: subscriptions.clone(),
             sub_id_counter,
@@ -824,7 +829,7 @@ mod tests {
 
         let conn = Connection {
             outbound_tx: out_tx,
-            inbound_rx: in_rx,
+            inbound_rx: Arc::new(Mutex::new(in_rx)),
             shutdown_tx,
             subscriptions: subscriptions.clone(),
             sub_id_counter,
@@ -841,6 +846,123 @@ mod tests {
             assert_eq!(q.len(), 2);
             assert_eq!(q[0].0, "a");
             assert_eq!(q[1].0, "c");
+        }
+
+        // verify an ACK frame was emitted
+        if let Some(item) = out_rx.recv().await {
+            match item {
+                StompItem::Frame(f) => assert_eq!(f.command, "ACK"),
+                _ => panic!("expected frame"),
+            }
+        } else {
+            panic!("no outbound frame sent")
+        }
+    }
+
+    #[tokio::test]
+    async fn test_subscription_receive_delivers_message() {
+        // setup channels
+        let (out_tx, _out_rx) = mpsc::channel::<StompItem>(8);
+        let (_in_tx, in_rx) = mpsc::channel::<Frame>(8);
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+
+        let subscriptions: Arc<Mutex<Subscriptions>> = Arc::new(Mutex::new(HashMap::new()));
+        let pending: Arc<Mutex<PendingMap>> = Arc::new(Mutex::new(HashMap::new()));
+
+        let sub_id_counter = Arc::new(AtomicU64::new(1));
+
+        let conn = Connection {
+            outbound_tx: out_tx,
+            inbound_rx: Arc::new(Mutex::new(in_rx)),
+            shutdown_tx,
+            subscriptions: subscriptions.clone(),
+            sub_id_counter,
+            pending: pending.clone(),
+        };
+
+        // subscribe
+        let subscription = conn
+            .subscribe("/queue/test", AckMode::Auto)
+            .await
+            .expect("subscribe failed");
+
+        // find the sender stored in the subscriptions map and push a message
+        {
+            let map = conn.subscriptions.lock().await;
+            let vec = map.get("/queue/test").expect("missing subscription vec");
+            let sender = &vec[0].sender;
+            let f = make_message("m1", Some(&vec[0].id), Some("/queue/test"));
+            sender.try_send(f).expect("send to subscription failed");
+        }
+
+        // consume from the subscription receiver
+        let mut rx = subscription.into_receiver();
+        if let Some(received) = rx.recv().await {
+            assert_eq!(received.command, "MESSAGE");
+            // message-id header should be present
+            let mut found = false;
+            for (k, _v) in &received.headers {
+                if k.to_lowercase() == "message-id" {
+                    found = true;
+                    break;
+                }
+            }
+            assert!(found, "message-id header missing");
+        } else {
+            panic!("no message received on subscription")
+        }
+    }
+
+    #[tokio::test]
+    async fn test_subscription_ack_removes_pending_and_sends_ack() {
+        // setup channels
+        let (out_tx, mut out_rx) = mpsc::channel::<StompItem>(8);
+        let (_in_tx, in_rx) = mpsc::channel::<Frame>(8);
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+
+        let subscriptions: Arc<Mutex<Subscriptions>> = Arc::new(Mutex::new(HashMap::new()));
+        let pending: Arc<Mutex<PendingMap>> = Arc::new(Mutex::new(HashMap::new()));
+
+        let sub_id_counter = Arc::new(AtomicU64::new(1));
+
+        let conn = Connection {
+            outbound_tx: out_tx,
+            inbound_rx: Arc::new(Mutex::new(in_rx)),
+            shutdown_tx,
+            subscriptions: subscriptions.clone(),
+            sub_id_counter,
+            pending: pending.clone(),
+        };
+
+        // subscribe with client ack
+        let subscription = conn
+            .subscribe("/queue/ack", AckMode::Client)
+            .await
+            .expect("subscribe failed");
+
+        let sub_id = subscription.id().to_string();
+
+    // drain any initial outbound frames (SUBSCRIBE) emitted by subscribe()
+    while out_rx.try_recv().is_ok() {}
+
+    // populate pending queue for this subscription
+        {
+            let mut p = conn.pending.lock().await;
+            let mut q = VecDeque::new();
+            q.push_back((
+                "mid-1".to_string(),
+                make_message("mid-1", Some(&sub_id), Some("/queue/ack")),
+            ));
+            p.insert(sub_id.clone(), q);
+        }
+
+        // ack the message via the subscription helper
+        subscription.ack("mid-1").await.expect("ack failed");
+
+        // ensure pending queue no longer contains the message
+        {
+            let p = conn.pending.lock().await;
+            assert!(p.get(&sub_id).is_none() || p.get(&sub_id).unwrap().is_empty());
         }
 
         // verify an ACK frame was emitted
