@@ -1,7 +1,8 @@
 # iridium-stomp
+
 [![CI](https://github.com/bsiegfreid/iridium-stomp/actions/workflows/ci.yml/badge.svg)](https://github.com/bsiegfreid/iridium-stomp/actions/workflows/ci.yml)
 
-Asynchronous STOMP 1.2 client library for Rust — lightweight, async-first, and focused on correctness for heartbeats and reconnect behavior.
+Asynchronous STOMP 1.2 client library for Rust.
 
 ## Quick start:
 
@@ -21,11 +22,6 @@ docker compose up -d
 # Run the integration smoke test
 cargo test --test stomp_smoke
 ```
-
-## Features & focus
-- Heartbeat negotiation and automatic reconnect on missed heartbeats
-- Framed STOMP encoder/decoder integrated with Tokio
-- Small, explicit API surface intended for embedding into async apps
 
 ## Minimal usage example
 
@@ -56,18 +52,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-
-Where to find developer docs and tests
-- Developer-focused test & run instructions are in `CONTRIBUTING.md` at the repo root.
-- Integration smoke test: `tests/stomp_smoke.rs`.
-
-Contributing
-- If you're working on the library internals, consult `CONTRIBUTING.md` for instructions on running RabbitMQ locally and CI behavior.
-- Backlog items and roadmap are in `.github/issues/` (drafts) — run the script `.github/scripts/create_issues.sh` to convert drafts into GitHub issues.
-
-## License
-- This project is licensed under the MIT License (see `LICENSE`).
-
 ## Running the quickstart example
 
 To run the example added in `examples/quickstart.rs`:
@@ -89,3 +73,4 @@ Notes:
 - The example connects to `127.0.0.1:61613` using the `guest`/`guest` credentials by default.
 - The example will time out waiting for an incoming frame after 5 seconds and exit cleanly if none arrives.
 - If you want the example validated on CI, I can add a build-only job that runs `cargo build --examples`.
+

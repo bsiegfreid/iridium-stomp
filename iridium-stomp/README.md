@@ -1,10 +1,8 @@
 # iridium-stomp
 
-Asynchronous STOMP 1.2 client library for Rust — lightweight, async-first, and focused on heartbeat negotiation and reconnect behavior.
+Asynchronous STOMP 1.2 client library for Rust.
 
-This README is the crate-level README used by Cargo and crates.io. For developer-facing instructions, CI, and helper scripts, see the repository root `README.md` and `CONTRIBUTING.md`.
-
-## Quickstart (crate)
+## Quickstart
 
 Add the crate from GitHub for local testing:
 
