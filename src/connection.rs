@@ -716,6 +716,19 @@ impl Connection {
         Ok(())
     }
 
+    /// Helper to send a transaction frame (BEGIN, COMMIT, or ABORT).
+    async fn send_transaction_frame(
+        &self,
+        command: &str,
+        transaction_id: &str,
+    ) -> Result<(), ConnError> {
+        let f = Frame::new(command).header("transaction", transaction_id);
+        self.outbound_tx
+            .send(StompItem::Frame(f))
+            .await
+            .map_err(|_| ConnError::Protocol("send channel closed".into()))
+    }
+
     /// Begin a transaction.
     ///
     /// Parameters
@@ -728,12 +741,7 @@ impl Connection {
     ///   transaction id to group them into the transaction. The transaction must
     ///   be finalized with either `commit` or `abort`.
     pub async fn begin(&self, transaction_id: &str) -> Result<(), ConnError> {
-        let mut f = Frame::new("BEGIN");
-        f = f.header("transaction", transaction_id);
-        self.outbound_tx
-            .send(StompItem::Frame(f))
-            .await
-            .map_err(|_| ConnError::Protocol("send channel closed".into()))
+        self.send_transaction_frame("BEGIN", transaction_id).await
     }
 
     /// Commit a transaction.
@@ -745,12 +753,7 @@ impl Connection {
     /// - Sends a `COMMIT` frame to the server with `transaction:<transaction_id>`
     ///   header. All operations within the transaction are applied atomically.
     pub async fn commit(&self, transaction_id: &str) -> Result<(), ConnError> {
-        let mut f = Frame::new("COMMIT");
-        f = f.header("transaction", transaction_id);
-        self.outbound_tx
-            .send(StompItem::Frame(f))
-            .await
-            .map_err(|_| ConnError::Protocol("send channel closed".into()))
+        self.send_transaction_frame("COMMIT", transaction_id).await
     }
 
     /// Abort a transaction.
@@ -762,12 +765,7 @@ impl Connection {
     /// - Sends an `ABORT` frame to the server with `transaction:<transaction_id>`
     ///   header. All operations within the transaction are discarded.
     pub async fn abort(&self, transaction_id: &str) -> Result<(), ConnError> {
-        let mut f = Frame::new("ABORT");
-        f = f.header("transaction", transaction_id);
-        self.outbound_tx
-            .send(StompItem::Frame(f))
-            .await
-            .map_err(|_| ConnError::Protocol("send channel closed".into()))
+        self.send_transaction_frame("ABORT", transaction_id).await
     }
 
     pub async fn next_frame(&self) -> Option<Frame> {
