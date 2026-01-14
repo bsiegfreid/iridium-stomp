@@ -1089,9 +1089,9 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_begin_transaction_sends_frame() {
-        let (out_tx, mut out_rx) = mpsc::channel::<StompItem>(8);
+    // Helper function to create a test connection and output receiver
+    fn setup_test_connection() -> (Connection, mpsc::Receiver<StompItem>) {
+        let (out_tx, out_rx) = mpsc::channel::<StompItem>(8);
         let (_in_tx, in_rx) = mpsc::channel::<Frame>(8);
         let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
@@ -1108,25 +1108,32 @@ mod tests {
             pending,
         };
 
+        (conn, out_rx)
+    }
+
+    // Helper function to verify a frame with a transaction header
+    fn verify_transaction_frame(
+        frame: Frame,
+        expected_command: &str,
+        expected_tx_id: &str,
+    ) {
+        assert_eq!(frame.command, expected_command);
+        assert!(
+            frame.headers.iter().any(|(k, v)| k == "transaction" && v == expected_tx_id),
+            "transaction header with id '{}' not found",
+            expected_tx_id
+        );
+    }
+
+    #[tokio::test]
+    async fn test_begin_transaction_sends_frame() {
+        let (conn, mut out_rx) = setup_test_connection();
+
         conn.begin("tx1").await.expect("begin failed");
 
         // verify BEGIN frame was emitted
-        if let Some(item) = out_rx.recv().await {
-            match item {
-                StompItem::Frame(f) => {
-                    assert_eq!(f.command, "BEGIN");
-                    // verify transaction header
-                    let mut found = false;
-                    for (k, v) in &f.headers {
-                        if k == "transaction" && v == "tx1" {
-                            found = true;
-                            break;
-                        }
-                    }
-                    assert!(found, "transaction header not found");
-                }
-                _ => panic!("expected frame"),
-            }
+        if let Some(StompItem::Frame(f)) = out_rx.recv().await {
+            verify_transaction_frame(f, "BEGIN", "tx1");
         } else {
             panic!("no outbound frame sent")
         }
@@ -1134,42 +1141,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_commit_transaction_sends_frame() {
-        let (out_tx, mut out_rx) = mpsc::channel::<StompItem>(8);
-        let (_in_tx, in_rx) = mpsc::channel::<Frame>(8);
-        let (shutdown_tx, _) = broadcast::channel::<()>(1);
-
-        let subscriptions: Arc<Mutex<Subscriptions>> = Arc::new(Mutex::new(HashMap::new()));
-        let pending: Arc<Mutex<PendingMap>> = Arc::new(Mutex::new(HashMap::new()));
-        let sub_id_counter = Arc::new(AtomicU64::new(1));
-
-        let conn = Connection {
-            outbound_tx: out_tx,
-            inbound_rx: Arc::new(Mutex::new(in_rx)),
-            shutdown_tx,
-            subscriptions,
-            sub_id_counter,
-            pending,
-        };
+        let (conn, mut out_rx) = setup_test_connection();
 
         conn.commit("tx1").await.expect("commit failed");
 
         // verify COMMIT frame was emitted
-        if let Some(item) = out_rx.recv().await {
-            match item {
-                StompItem::Frame(f) => {
-                    assert_eq!(f.command, "COMMIT");
-                    // verify transaction header
-                    let mut found = false;
-                    for (k, v) in &f.headers {
-                        if k == "transaction" && v == "tx1" {
-                            found = true;
-                            break;
-                        }
-                    }
-                    assert!(found, "transaction header not found");
-                }
-                _ => panic!("expected frame"),
-            }
+        if let Some(StompItem::Frame(f)) = out_rx.recv().await {
+            verify_transaction_frame(f, "COMMIT", "tx1");
         } else {
             panic!("no outbound frame sent")
         }
@@ -1177,42 +1155,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_abort_transaction_sends_frame() {
-        let (out_tx, mut out_rx) = mpsc::channel::<StompItem>(8);
-        let (_in_tx, in_rx) = mpsc::channel::<Frame>(8);
-        let (shutdown_tx, _) = broadcast::channel::<()>(1);
-
-        let subscriptions: Arc<Mutex<Subscriptions>> = Arc::new(Mutex::new(HashMap::new()));
-        let pending: Arc<Mutex<PendingMap>> = Arc::new(Mutex::new(HashMap::new()));
-        let sub_id_counter = Arc::new(AtomicU64::new(1));
-
-        let conn = Connection {
-            outbound_tx: out_tx,
-            inbound_rx: Arc::new(Mutex::new(in_rx)),
-            shutdown_tx,
-            subscriptions,
-            sub_id_counter,
-            pending,
-        };
+        let (conn, mut out_rx) = setup_test_connection();
 
         conn.abort("tx1").await.expect("abort failed");
 
         // verify ABORT frame was emitted
-        if let Some(item) = out_rx.recv().await {
-            match item {
-                StompItem::Frame(f) => {
-                    assert_eq!(f.command, "ABORT");
-                    // verify transaction header
-                    let mut found = false;
-                    for (k, v) in &f.headers {
-                        if k == "transaction" && v == "tx1" {
-                            found = true;
-                            break;
-                        }
-                    }
-                    assert!(found, "transaction header not found");
-                }
-                _ => panic!("expected frame"),
-            }
+        if let Some(StompItem::Frame(f)) = out_rx.recv().await {
+            verify_transaction_frame(f, "ABORT", "tx1");
         } else {
             panic!("no outbound frame sent")
         }
