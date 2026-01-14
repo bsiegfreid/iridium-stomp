@@ -36,6 +36,7 @@ jobs:
           echo '<meta http-equiv="refresh" content="0; url=iridium_stomp/index.html">' > target/doc/index.html
           touch target/doc/.nojekyll
 
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -52,3 +53,4 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
         timeout-minutes: 10
+
