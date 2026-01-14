@@ -716,6 +716,58 @@ impl Connection {
         Ok(())
     }
 
+    /// Helper to send a transaction frame (BEGIN, COMMIT, or ABORT).
+    async fn send_transaction_frame(
+        &self,
+        command: &str,
+        transaction_id: &str,
+    ) -> Result<(), ConnError> {
+        let f = Frame::new(command).header("transaction", transaction_id);
+        self.outbound_tx
+            .send(StompItem::Frame(f))
+            .await
+            .map_err(|_| ConnError::Protocol("send channel closed".into()))
+    }
+
+    /// Begin a transaction.
+    ///
+    /// Parameters
+    /// - `transaction_id`: unique identifier for the transaction. The caller is
+    ///   responsible for ensuring uniqueness within the connection.
+    ///
+    /// Behavior
+    /// - Sends a `BEGIN` frame to the server with `transaction:<transaction_id>`
+    ///   header. Subsequent `SEND`, `ACK`, and `NACK` frames may include this
+    ///   transaction id to group them into the transaction. The transaction must
+    ///   be finalized with either `commit` or `abort`.
+    pub async fn begin(&self, transaction_id: &str) -> Result<(), ConnError> {
+        self.send_transaction_frame("BEGIN", transaction_id).await
+    }
+
+    /// Commit a transaction.
+    ///
+    /// Parameters
+    /// - `transaction_id`: the transaction identifier previously passed to `begin`.
+    ///
+    /// Behavior
+    /// - Sends a `COMMIT` frame to the server with `transaction:<transaction_id>`
+    ///   header. All operations within the transaction are applied atomically.
+    pub async fn commit(&self, transaction_id: &str) -> Result<(), ConnError> {
+        self.send_transaction_frame("COMMIT", transaction_id).await
+    }
+
+    /// Abort a transaction.
+    ///
+    /// Parameters
+    /// - `transaction_id`: the transaction identifier previously passed to `begin`.
+    ///
+    /// Behavior
+    /// - Sends an `ABORT` frame to the server with `transaction:<transaction_id>`
+    ///   header. All operations within the transaction are discarded.
+    pub async fn abort(&self, transaction_id: &str) -> Result<(), ConnError> {
+        self.send_transaction_frame("ABORT", transaction_id).await
+    }
+
     pub async fn next_frame(&self) -> Option<Frame> {
         // Receive the next inbound `Frame` produced by the background reader
         // task. Returns `Some(Frame)` when available or `None` if the inbound
@@ -1030,6 +1082,83 @@ mod tests {
                 StompItem::Frame(f) => assert_eq!(f.command, "ACK"),
                 _ => panic!("expected frame"),
             }
+        } else {
+            panic!("no outbound frame sent")
+        }
+    }
+
+    // Helper function to create a test connection and output receiver
+    fn setup_test_connection() -> (Connection, mpsc::Receiver<StompItem>) {
+        let (out_tx, out_rx) = mpsc::channel::<StompItem>(8);
+        let (_in_tx, in_rx) = mpsc::channel::<Frame>(8);
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+
+        let subscriptions: Arc<Mutex<Subscriptions>> = Arc::new(Mutex::new(HashMap::new()));
+        let pending: Arc<Mutex<PendingMap>> = Arc::new(Mutex::new(HashMap::new()));
+        let sub_id_counter = Arc::new(AtomicU64::new(1));
+
+        let conn = Connection {
+            outbound_tx: out_tx,
+            inbound_rx: Arc::new(Mutex::new(in_rx)),
+            shutdown_tx,
+            subscriptions,
+            sub_id_counter,
+            pending,
+        };
+
+        (conn, out_rx)
+    }
+
+    // Helper function to verify a frame with a transaction header
+    fn verify_transaction_frame(frame: Frame, expected_command: &str, expected_tx_id: &str) {
+        assert_eq!(frame.command, expected_command);
+        assert!(
+            frame
+                .headers
+                .iter()
+                .any(|(k, v)| k == "transaction" && v == expected_tx_id),
+            "transaction header with id '{}' not found",
+            expected_tx_id
+        );
+    }
+
+    #[tokio::test]
+    async fn test_begin_transaction_sends_frame() {
+        let (conn, mut out_rx) = setup_test_connection();
+
+        conn.begin("tx1").await.expect("begin failed");
+
+        // verify BEGIN frame was emitted
+        if let Some(StompItem::Frame(f)) = out_rx.recv().await {
+            verify_transaction_frame(f, "BEGIN", "tx1");
+        } else {
+            panic!("no outbound frame sent")
+        }
+    }
+
+    #[tokio::test]
+    async fn test_commit_transaction_sends_frame() {
+        let (conn, mut out_rx) = setup_test_connection();
+
+        conn.commit("tx1").await.expect("commit failed");
+
+        // verify COMMIT frame was emitted
+        if let Some(StompItem::Frame(f)) = out_rx.recv().await {
+            verify_transaction_frame(f, "COMMIT", "tx1");
+        } else {
+            panic!("no outbound frame sent")
+        }
+    }
+
+    #[tokio::test]
+    async fn test_abort_transaction_sends_frame() {
+        let (conn, mut out_rx) = setup_test_connection();
+
+        conn.abort("tx1").await.expect("abort failed");
+
+        // verify ABORT frame was emitted
+        if let Some(StompItem::Frame(f)) = out_rx.recv().await {
+            verify_transaction_frame(f, "ABORT", "tx1");
         } else {
             panic!("no outbound frame sent")
         }
