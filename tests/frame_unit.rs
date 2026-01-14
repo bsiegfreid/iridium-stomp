@@ -35,7 +35,10 @@ fn frame_new_with_string() {
 fn frame_header_builder_single() {
     let frame = Frame::new("SEND").header("destination", "/queue/test");
     assert_eq!(frame.headers.len(), 1);
-    assert_eq!(frame.headers[0], ("destination".to_string(), "/queue/test".to_string()));
+    assert_eq!(
+        frame.headers[0],
+        ("destination".to_string(), "/queue/test".to_string())
+    );
 }
 
 #[test]
@@ -245,14 +248,20 @@ fn frame_duplicate_headers() {
         .header("custom", "first")
         .header("custom", "second");
     assert_eq!(frame.headers.len(), 2);
-    assert_eq!(frame.headers[0], ("custom".to_string(), "first".to_string()));
-    assert_eq!(frame.headers[1], ("custom".to_string(), "second".to_string()));
+    assert_eq!(
+        frame.headers[0],
+        ("custom".to_string(), "first".to_string())
+    );
+    assert_eq!(
+        frame.headers[1],
+        ("custom".to_string(), "second".to_string())
+    );
 }
 
 #[test]
 fn frame_header_special_characters() {
-    let frame = Frame::new("SEND")
-        .header("url", "http://example.com:8080/path?query=value&other=123");
+    let frame =
+        Frame::new("SEND").header("url", "http://example.com:8080/path?query=value&other=123");
     assert_eq!(
         frame.headers[0].1,
         "http://example.com:8080/path?query=value&other=123"
