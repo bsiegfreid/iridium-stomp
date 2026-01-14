@@ -45,10 +45,19 @@ jobs:
             sleep 2
           done
           
-          # Now verify STOMP plugin is enabled and operational
+          # Give RabbitMQ a moment to fully initialize all APIs after overview responds
+          echo "Management API ready, waiting for full initialization..."
+          sleep 3
+          
+          # Now verify STOMP plugin is enabled via the plugins API
           for i in $(seq 1 30); do
-            PLUGINS=$(curl -sf -u guest:guest http://localhost:15672/api/plugins 2>/dev/null || echo "")
-            if echo "$PLUGINS" | grep -q '"name":"rabbitmq_stomp".*"enabled":true'; then
+            PLUGINS=$(curl -sf -u guest:guest http://localhost:15672/api/plugins 2>&1 || echo "CURL_FAILED")
+            if [ "$PLUGINS" = "CURL_FAILED" ]; then
+              echo "Waiting for plugins API to become available... ($i/30)"
+              sleep 2
+              continue
+            fi
+            if echo "$PLUGINS" | grep -q 'rabbitmq_stomp' && echo "$PLUGINS" | grep -q '"enabled":true'; then
               echo "STOMP plugin is enabled and running"
               break
             fi
