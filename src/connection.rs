@@ -1110,14 +1110,13 @@ mod tests {
     }
 
     // Helper function to verify a frame with a transaction header
-    fn verify_transaction_frame(
-        frame: Frame,
-        expected_command: &str,
-        expected_tx_id: &str,
-    ) {
+    fn verify_transaction_frame(frame: Frame, expected_command: &str, expected_tx_id: &str) {
         assert_eq!(frame.command, expected_command);
         assert!(
-            frame.headers.iter().any(|(k, v)| k == "transaction" && v == expected_tx_id),
+            frame
+                .headers
+                .iter()
+                .any(|(k, v)| k == "transaction" && v == expected_tx_id),
             "transaction header with id '{}' not found",
             expected_tx_id
         );
