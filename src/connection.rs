@@ -716,6 +716,60 @@ impl Connection {
         Ok(())
     }
 
+    /// Begin a transaction.
+    ///
+    /// Parameters
+    /// - `transaction_id`: unique identifier for the transaction. The caller is
+    ///   responsible for ensuring uniqueness within the connection.
+    ///
+    /// Behavior
+    /// - Sends a `BEGIN` frame to the server with `transaction:<transaction_id>`
+    ///   header. Subsequent `SEND`, `ACK`, and `NACK` frames may include this
+    ///   transaction id to group them into the transaction. The transaction must
+    ///   be finalized with either `commit` or `abort`.
+    pub async fn begin(&self, transaction_id: &str) -> Result<(), ConnError> {
+        let mut f = Frame::new("BEGIN");
+        f = f.header("transaction", transaction_id);
+        self.outbound_tx
+            .send(StompItem::Frame(f))
+            .await
+            .map_err(|_| ConnError::Protocol("send channel closed".into()))
+    }
+
+    /// Commit a transaction.
+    ///
+    /// Parameters
+    /// - `transaction_id`: the transaction identifier previously passed to `begin`.
+    ///
+    /// Behavior
+    /// - Sends a `COMMIT` frame to the server with `transaction:<transaction_id>`
+    ///   header. All operations within the transaction are applied atomically.
+    pub async fn commit(&self, transaction_id: &str) -> Result<(), ConnError> {
+        let mut f = Frame::new("COMMIT");
+        f = f.header("transaction", transaction_id);
+        self.outbound_tx
+            .send(StompItem::Frame(f))
+            .await
+            .map_err(|_| ConnError::Protocol("send channel closed".into()))
+    }
+
+    /// Abort a transaction.
+    ///
+    /// Parameters
+    /// - `transaction_id`: the transaction identifier previously passed to `begin`.
+    ///
+    /// Behavior
+    /// - Sends an `ABORT` frame to the server with `transaction:<transaction_id>`
+    ///   header. All operations within the transaction are discarded.
+    pub async fn abort(&self, transaction_id: &str) -> Result<(), ConnError> {
+        let mut f = Frame::new("ABORT");
+        f = f.header("transaction", transaction_id);
+        self.outbound_tx
+            .send(StompItem::Frame(f))
+            .await
+            .map_err(|_| ConnError::Protocol("send channel closed".into()))
+    }
+
     pub async fn next_frame(&self) -> Option<Frame> {
         // Receive the next inbound `Frame` produced by the background reader
         // task. Returns `Some(Frame)` when available or `None` if the inbound
@@ -1028,6 +1082,135 @@ mod tests {
         if let Some(item) = out_rx.recv().await {
             match item {
                 StompItem::Frame(f) => assert_eq!(f.command, "ACK"),
+                _ => panic!("expected frame"),
+            }
+        } else {
+            panic!("no outbound frame sent")
+        }
+    }
+
+    #[tokio::test]
+    async fn test_begin_transaction_sends_frame() {
+        let (out_tx, mut out_rx) = mpsc::channel::<StompItem>(8);
+        let (_in_tx, in_rx) = mpsc::channel::<Frame>(8);
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+
+        let subscriptions: Arc<Mutex<Subscriptions>> = Arc::new(Mutex::new(HashMap::new()));
+        let pending: Arc<Mutex<PendingMap>> = Arc::new(Mutex::new(HashMap::new()));
+        let sub_id_counter = Arc::new(AtomicU64::new(1));
+
+        let conn = Connection {
+            outbound_tx: out_tx,
+            inbound_rx: Arc::new(Mutex::new(in_rx)),
+            shutdown_tx,
+            subscriptions,
+            sub_id_counter,
+            pending,
+        };
+
+        conn.begin("tx1").await.expect("begin failed");
+
+        // verify BEGIN frame was emitted
+        if let Some(item) = out_rx.recv().await {
+            match item {
+                StompItem::Frame(f) => {
+                    assert_eq!(f.command, "BEGIN");
+                    // verify transaction header
+                    let mut found = false;
+                    for (k, v) in &f.headers {
+                        if k == "transaction" && v == "tx1" {
+                            found = true;
+                            break;
+                        }
+                    }
+                    assert!(found, "transaction header not found");
+                }
+                _ => panic!("expected frame"),
+            }
+        } else {
+            panic!("no outbound frame sent")
+        }
+    }
+
+    #[tokio::test]
+    async fn test_commit_transaction_sends_frame() {
+        let (out_tx, mut out_rx) = mpsc::channel::<StompItem>(8);
+        let (_in_tx, in_rx) = mpsc::channel::<Frame>(8);
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+
+        let subscriptions: Arc<Mutex<Subscriptions>> = Arc::new(Mutex::new(HashMap::new()));
+        let pending: Arc<Mutex<PendingMap>> = Arc::new(Mutex::new(HashMap::new()));
+        let sub_id_counter = Arc::new(AtomicU64::new(1));
+
+        let conn = Connection {
+            outbound_tx: out_tx,
+            inbound_rx: Arc::new(Mutex::new(in_rx)),
+            shutdown_tx,
+            subscriptions,
+            sub_id_counter,
+            pending,
+        };
+
+        conn.commit("tx1").await.expect("commit failed");
+
+        // verify COMMIT frame was emitted
+        if let Some(item) = out_rx.recv().await {
+            match item {
+                StompItem::Frame(f) => {
+                    assert_eq!(f.command, "COMMIT");
+                    // verify transaction header
+                    let mut found = false;
+                    for (k, v) in &f.headers {
+                        if k == "transaction" && v == "tx1" {
+                            found = true;
+                            break;
+                        }
+                    }
+                    assert!(found, "transaction header not found");
+                }
+                _ => panic!("expected frame"),
+            }
+        } else {
+            panic!("no outbound frame sent")
+        }
+    }
+
+    #[tokio::test]
+    async fn test_abort_transaction_sends_frame() {
+        let (out_tx, mut out_rx) = mpsc::channel::<StompItem>(8);
+        let (_in_tx, in_rx) = mpsc::channel::<Frame>(8);
+        let (shutdown_tx, _) = broadcast::channel::<()>(1);
+
+        let subscriptions: Arc<Mutex<Subscriptions>> = Arc::new(Mutex::new(HashMap::new()));
+        let pending: Arc<Mutex<PendingMap>> = Arc::new(Mutex::new(HashMap::new()));
+        let sub_id_counter = Arc::new(AtomicU64::new(1));
+
+        let conn = Connection {
+            outbound_tx: out_tx,
+            inbound_rx: Arc::new(Mutex::new(in_rx)),
+            shutdown_tx,
+            subscriptions,
+            sub_id_counter,
+            pending,
+        };
+
+        conn.abort("tx1").await.expect("abort failed");
+
+        // verify ABORT frame was emitted
+        if let Some(item) = out_rx.recv().await {
+            match item {
+                StompItem::Frame(f) => {
+                    assert_eq!(f.command, "ABORT");
+                    // verify transaction header
+                    let mut found = false;
+                    for (k, v) in &f.headers {
+                        if k == "transaction" && v == "tx1" {
+                            found = true;
+                            break;
+                        }
+                    }
+                    assert!(found, "transaction header not found");
+                }
                 _ => panic!("expected frame"),
             }
         } else {
