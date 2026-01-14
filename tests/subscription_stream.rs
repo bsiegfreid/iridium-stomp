@@ -21,7 +21,10 @@ fn subscription_options_default() {
 fn subscription_options_with_headers() {
     let opts = SubscriptionOptions {
         headers: vec![
-            ("activemq.subscriptionName".to_string(), "my-durable-sub".to_string()),
+            (
+                "activemq.subscriptionName".to_string(),
+                "my-durable-sub".to_string(),
+            ),
             ("selector".to_string(), "priority > 5".to_string()),
         ],
         durable_queue: None,
@@ -68,7 +71,10 @@ fn subscription_options_debug() {
 fn subscription_options_full_config() {
     let opts = SubscriptionOptions {
         headers: vec![
-            ("activemq.subscriptionName".to_string(), "durable-sub-1".to_string()),
+            (
+                "activemq.subscriptionName".to_string(),
+                "durable-sub-1".to_string(),
+            ),
             ("activemq.noLocal".to_string(), "true".to_string()),
             ("selector".to_string(), "type = 'important'".to_string()),
         ],
@@ -99,9 +105,10 @@ fn subscription_options_empty_header_values() {
 #[test]
 fn subscription_options_special_characters() {
     let opts = SubscriptionOptions {
-        headers: vec![
-            ("selector".to_string(), "id > 100 AND type = 'test'".to_string()),
-        ],
+        headers: vec![(
+            "selector".to_string(),
+            "id > 100 AND type = 'test'".to_string(),
+        )],
         durable_queue: Some("/queue/test?param=value&other=123".to_string()),
     };
     assert!(opts.headers[0].1.contains("'test'"));
