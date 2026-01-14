@@ -16,7 +16,7 @@ fn attempt_stomp_connection(
         eprintln!("Connection attempt {}/{}", attempt, max_attempts);
 
         // Try to establish TCP connection
-        let stream = match TcpStream::connect_timeout(&addr.parse()?, Duration::from_secs(5)) {
+        let mut stream = match TcpStream::connect_timeout(&addr.parse()?, Duration::from_secs(5)) {
             Ok(s) => s,
             Err(e) => {
                 last_error = Some(Box::new(e));
@@ -35,6 +35,9 @@ fn attempt_stomp_connection(
                 "  Failed to set read timeout: {}",
                 last_error.as_ref().unwrap()
             );
+            if attempt < max_attempts {
+                sleep(Duration::from_millis(500));
+            }
             continue;
         }
         if let Err(e) = stream.set_write_timeout(Some(Duration::from_secs(5))) {
@@ -43,11 +46,13 @@ fn attempt_stomp_connection(
                 "  Failed to set write timeout: {}",
                 last_error.as_ref().unwrap()
             );
+            if attempt < max_attempts {
+                sleep(Duration::from_millis(500));
+            }
             continue;
         }
 
         // Send STOMP CONNECT frame
-        let mut stream = stream;
         let frame = "CONNECT\naccept-version:1.2\nhost:/\nlogin:guest\npasscode:guest\n\n\0";
         if let Err(e) = stream.write_all(frame.as_bytes()) {
             last_error = Some(Box::new(e));
