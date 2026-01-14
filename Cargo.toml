@@ -3,7 +3,7 @@ name = "iridium-stomp"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-authors = ["Brad Siegfreid <brad@iridiumdesign.com>"]
+authors = ["Brad Siegfreid <bsiegfreid@me.com>"]
 description = "Async STOMP 1.2 client for Rust"
 readme = "README.md"
 repository = "https://github.com/bsiegfreid/iridium-stomp"
@@ -12,7 +12,7 @@ documentation = "https://docs.rs/iridium-stomp"
 keywords = ["stomp", "async", "messaging", "tokio", "rabbitmq"]
 categories = ["network-programming", "asynchronous"]
 # Ensure docs files are packaged and instruct docs.rs to build with all features
-include = ["src/**", "Cargo.toml", "README.md", "LICENSE", "docs/**"]
+include = ["src/**", "examples/**", "docs/**", "Cargo.toml", "README.md", "LICENSE"]
 
 [package.metadata.docs.rs]
 all-features = true
