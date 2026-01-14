@@ -15,15 +15,27 @@ include = ["src/**", "Cargo.toml", "README.md", "LICENSE", "docs/**"]
 [package.metadata.docs.rs]
 all-features = true
 
+[features]
+default = []
+cli = ["clap"]
+
+[[bin]]
+name = "stomp"
+path = "src/bin/stomp.rs"
+required-features = ["cli"]
+
 [dependencies]
 
 # Async runtime and utilities
-tokio = { version = "1", features = ["net", "time", "rt-multi-thread", "sync", "macros"] }
+tokio = { version = "1", features = ["net", "time", "rt-multi-thread", "sync", "macros", "io-std", "io-util"] }
 bytes = "1"
 tokio-util = { version = "0.7", features = ["codec"] }
 futures = "0.3"
 thiserror = "1"
 tracing = "0.1"
+
+# CLI (optional)
+clap = { version = "4", features = ["derive"], optional = true }
 
 [dev-dependencies]
 rand = "0.8"
