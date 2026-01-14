@@ -78,14 +78,38 @@ To run the example added in `examples/quickstart.rs`:
 docker compose up -d
 ```
 
-2. From the crate directory, run the example:
+2. Run the example:
 
 ```bash
-cd iridium-stomp
 cargo run --example quickstart
 ```
 
 Notes:
 - The example connects to `127.0.0.1:61613` using the `guest`/`guest` credentials by default.
 - The example will time out waiting for an incoming frame after 5 seconds and exit cleanly if none arrives.
-- If you want the example validated on CI, I can add a build-only job that runs `cargo build --examples`.
+
+## CLI
+
+An interactive CLI is available for testing and ad-hoc messaging. Install with the `cli` feature:
+
+```bash
+cargo install iridium-stomp --features cli
+```
+
+Or run directly from the repository:
+
+```bash
+cargo run --features cli --bin stomp -- --help
+```
+
+Example usage:
+
+```bash
+# Connect and subscribe to a queue
+cargo run --features cli --bin stomp -- -s /queue/test
+
+# In the interactive session:
+# > send /queue/test Hello World
+# > sub /queue/other
+# > quit
+```
