@@ -4,85 +4,52 @@ use bytes::BytesMut;
 use iridium_stomp::{Frame, StompCodec, StompItem};
 use tokio_util::codec::{Decoder, Encoder};
 
-#[test]
-fn test_begin_frame_encode_decode() {
+/// Helper function to verify a decoded frame has the expected command and transaction header
+fn verify_transaction_frame(frame: Frame, expected_command: &str, expected_tx_id: &str) {
+    assert_eq!(frame.command, expected_command);
+    let tx_header = frame
+        .headers
+        .iter()
+        .find(|(k, _)| k == "transaction")
+        .map(|(_, v)| v.as_str());
+    assert_eq!(tx_header, Some(expected_tx_id));
+}
+
+/// Helper function to encode and decode a transaction frame
+fn encode_decode_transaction_frame(
+    command: &str,
+    tx_id: &str,
+) -> Result<Frame, Box<dyn std::error::Error>> {
     let mut codec = StompCodec::new();
     let mut buf = BytesMut::new();
 
-    // Encode BEGIN frame
-    let begin_frame = Frame::new("BEGIN").header("transaction", "tx1");
-    codec
-        .encode(StompItem::Frame(begin_frame), &mut buf)
-        .expect("encode failed");
+    // Encode frame
+    let frame = Frame::new(command).header("transaction", tx_id);
+    codec.encode(StompItem::Frame(frame), &mut buf)?;
 
-    // Decode BEGIN frame
-    match codec.decode(&mut buf).expect("decode failed") {
-        Some(StompItem::Frame(f)) => {
-            assert_eq!(f.command, "BEGIN");
-            // Verify transaction header
-            let tx_header = f
-                .headers
-                .iter()
-                .find(|(k, _)| k == "transaction")
-                .map(|(_, v)| v.as_str());
-            assert_eq!(tx_header, Some("tx1"));
-        }
-        _ => panic!("Expected Frame, got something else"),
+    // Decode frame
+    match codec.decode(&mut buf)? {
+        Some(StompItem::Frame(f)) => Ok(f),
+        _ => Err("Expected Frame, got something else".into()),
     }
+}
+
+#[test]
+fn test_begin_frame_encode_decode() {
+    let frame = encode_decode_transaction_frame("BEGIN", "tx1").expect("encode/decode failed");
+    verify_transaction_frame(frame, "BEGIN", "tx1");
 }
 
 #[test]
 fn test_commit_frame_encode_decode() {
-    let mut codec = StompCodec::new();
-    let mut buf = BytesMut::new();
-
-    // Encode COMMIT frame
-    let commit_frame = Frame::new("COMMIT").header("transaction", "tx2");
-    codec
-        .encode(StompItem::Frame(commit_frame), &mut buf)
-        .expect("encode failed");
-
-    // Decode COMMIT frame
-    match codec.decode(&mut buf).expect("decode failed") {
-        Some(StompItem::Frame(f)) => {
-            assert_eq!(f.command, "COMMIT");
-            // Verify transaction header
-            let tx_header = f
-                .headers
-                .iter()
-                .find(|(k, _)| k == "transaction")
-                .map(|(_, v)| v.as_str());
-            assert_eq!(tx_header, Some("tx2"));
-        }
-        _ => panic!("Expected Frame, got something else"),
-    }
+    let frame = encode_decode_transaction_frame("COMMIT", "tx2").expect("encode/decode failed");
+    verify_transaction_frame(frame, "COMMIT", "tx2");
 }
 
 #[test]
 fn test_abort_frame_encode_decode() {
-    let mut codec = StompCodec::new();
-    let mut buf = BytesMut::new();
-
-    // Encode ABORT frame
-    let abort_frame = Frame::new("ABORT").header("transaction", "tx3");
-    codec
-        .encode(StompItem::Frame(abort_frame), &mut buf)
-        .expect("encode failed");
-
-    // Decode ABORT frame
-    match codec.decode(&mut buf).expect("decode failed") {
-        Some(StompItem::Frame(f)) => {
-            assert_eq!(f.command, "ABORT");
-            // Verify transaction header
-            let tx_header = f
-                .headers
-                .iter()
-                .find(|(k, _)| k == "transaction")
-                .map(|(_, v)| v.as_str());
-            assert_eq!(tx_header, Some("tx3"));
-        }
-        _ => panic!("Expected Frame, got something else"),
-    }
+    let frame = encode_decode_transaction_frame("ABORT", "tx3").expect("encode/decode failed");
+    verify_transaction_frame(frame, "ABORT", "tx3");
 }
 
 #[test]
