@@ -70,11 +70,19 @@ CI job summary
 
 The GitHub Actions workflow runs the following jobs (see `.github/workflows/ci.yml`):
 
+- `Smoke integration test` — Builds a RabbitMQ container with STOMP, waits for full readiness using management API checks, and runs `tests/stomp_smoke.rs` to verify end-to-end connectivity
 - `Format check` — `cargo fmt --all -- --check`
 - `Clippy` — `cargo clippy --all-targets --all-features -- -D warnings`
 - `Unit tests` — runs `cargo test --lib` on a matrix of Rust toolchains (stable, beta, nightly)
 - `Build examples` — `cargo build --examples`
-- `test` — integration smoke test that builds a baked RabbitMQ image and runs `tests/stomp_smoke.rs`
+
+**Smoke test robustness**: The integration test uses a multi-stage readiness check to prevent flaky failures:
+1. Management API health check (broker is starting)
+2. STOMP plugin enabled verification (plugin is operational)
+3. STOMP port connection test (port accepts connections)
+4. Test itself includes retry logic with exponential backoff
+
+This approach ensures the broker is genuinely ready before tests run, eliminating race conditions that cause intermittent CI failures.
 
 Submitting patches
 ------------------

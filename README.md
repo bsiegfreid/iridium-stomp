@@ -244,6 +244,52 @@ cargo test --test codec_fuzz        # Randomized chunk splitting
 cargo test --test codec_stress      # Concurrent stress testing
 ```
 
+### Integration Tests in CI
+
+The CI workflow includes a smoke integration test that verifies the library works against a real RabbitMQ broker with STOMP enabled. This test ensures end-to-end functionality beyond unit tests.
+
+**How it works:**
+
+1. **Broker Setup**: CI builds a Docker image with RabbitMQ 3.11 and the STOMP plugin pre-enabled (see `.github/docker/rabbitmq-stomp/Dockerfile`)
+
+2. **Readiness Checks**: Before running tests, CI performs multi-stage readiness verification:
+   - Waits for RabbitMQ management API to respond (indicates broker is starting)
+   - Verifies STOMP plugin is fully enabled via the management API
+   - Confirms STOMP port 61613 accepts TCP connections
+   
+   This ensures the broker is truly ready, preventing flaky test failures from timing issues.
+
+3. **Smoke Test**: Runs `tests/stomp_smoke.rs` which:
+   - Attempts a STOMP CONNECT with retry logic (5 attempts with backoff)
+   - Verifies the broker responds with CONNECTED frame
+   - Reports detailed connection diagnostics on failure
+
+4. **Debugging**: If tests fail, CI automatically dumps RabbitMQ logs for troubleshooting
+
+**Running integration tests locally:**
+
+Use the provided helper script which mimics the CI workflow:
+
+```bash
+./scripts/test-with-rabbit.sh
+```
+
+Or manually with docker-compose:
+
+```bash
+# Start RabbitMQ with STOMP
+docker compose up -d
+
+# Wait for it to be ready (management UI at http://localhost:15672)
+# Then run the smoke test
+RUN_STOMP_SMOKE=1 cargo test --test stomp_smoke
+
+# Cleanup
+docker compose down -v
+```
+
+The smoke test is skipped by default unless `RUN_STOMP_SMOKE=1` is set, since it requires an external broker.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, running tests

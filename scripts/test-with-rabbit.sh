@@ -9,7 +9,6 @@ CONTAINER_NAME="${CONTAINER_NAME:-iridium_rabbitmq_local}"
 BUILD_CONTEXT=".github/docker/rabbitmq-stomp"
 RABBIT_USER="${RABBIT_USER:-guest}"
 RABBIT_PASS="${RABBIT_PASS:-guest}"
-TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-60}"
 
 cleanup() {
   echo "Cleaning up: removing container and image..."
@@ -29,28 +28,55 @@ docker run -d --name "${CONTAINER_NAME}" \
   -p 5672:5672 -p 61613:61613 -p 15672:15672 \
   "${IMAGE_NAME}"
 
-echo "Waiting up to ${TIMEOUT_SECONDS}s for STOMP port 61613 to be ready..."
-start_ts=$(date +%s)
-while true; do
-  if (echo > /dev/tcp/localhost/61613) >/dev/null 2>&1; then
-    echo "STOMP port is open"
+echo "Waiting for RabbitMQ management API to be ready..."
+for i in $(seq 1 60); do
+  if curl -sf -u "${RABBIT_USER}:${RABBIT_PASS}" http://localhost:15672/api/overview >/dev/null 2>&1; then
+    echo "✓ Management API is responding (attempt $i)"
     break
   fi
-  now_ts=$(date +%s)
-  elapsed=$((now_ts - start_ts))
-  if [ "$elapsed" -ge "${TIMEOUT_SECONDS}" ]; then
-    echo "Timed out waiting for STOMP port (waited ${elapsed}s). Dumping container logs:"
+  if [ "$i" -eq 60 ]; then
+    echo "ERROR: Management API never became available. Dumping container logs:"
+    docker logs "${CONTAINER_NAME}" || true
+    exit 2
+  fi
+  sleep 2
+done
+
+echo "Verifying STOMP plugin is enabled..."
+for i in $(seq 1 30); do
+  PLUGINS=$(curl -sf -u "${RABBIT_USER}:${RABBIT_PASS}" http://localhost:15672/api/plugins 2>/dev/null || echo "")
+  if echo "$PLUGINS" | grep -q '"name":"rabbitmq_stomp".*"enabled":true'; then
+    echo "✓ STOMP plugin is enabled and running"
+    break
+  fi
+  if [ "$i" -eq 30 ]; then
+    echo "ERROR: STOMP plugin never became enabled. Plugin status:"
+    echo "$PLUGINS"
+    docker logs "${CONTAINER_NAME}" || true
+    exit 2
+  fi
+  sleep 2
+done
+
+echo "Verifying STOMP port accepts connections..."
+for i in $(seq 1 15); do
+  if (echo > /dev/tcp/localhost/61613) >/dev/null 2>&1; then
+    echo "✓ STOMP port 61613 is accepting connections"
+    break
+  fi
+  if [ "$i" -eq 15 ]; then
+    echo "ERROR: STOMP port never accepted connections. Dumping container logs:"
     docker logs "${CONTAINER_NAME}" || true
     exit 2
   fi
   sleep 1
 done
 
+echo "✓ RabbitMQ with STOMP is fully ready"
+echo ""
 echo "Running Rust smoke test..."
-pushd iridium-stomp >/dev/null
 cargo test --test stomp_smoke -- --nocapture
 test_exit=$?
-popd >/dev/null
 
 if [ "$test_exit" -ne 0 ]; then
   echo "Tests failed with exit code ${test_exit}; showing RabbitMQ logs for debugging:"
