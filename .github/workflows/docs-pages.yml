@@ -31,8 +31,11 @@ jobs:
       - name: Build docs
         run: cargo doc --no-deps
 
-      - name: Create index redirect
-        run: echo '<meta http-equiv="refresh" content="0; url=iridium_stomp/index.html">' > target/doc/index.html
+      - name: Prepare docs for Pages
+        run: |
+          echo '<meta http-equiv="refresh" content="0; url=iridium_stomp/index.html">' > target/doc/index.html
+          touch target/doc/.nojekyll
+
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
@@ -49,3 +52,5 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        timeout-minutes: 10
+
