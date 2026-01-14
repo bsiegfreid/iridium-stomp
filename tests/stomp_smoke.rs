@@ -16,10 +16,7 @@ fn attempt_stomp_connection(
         eprintln!("Connection attempt {}/{}", attempt, max_attempts);
 
         // Try to establish TCP connection
-        let stream = match TcpStream::connect_timeout(
-            &addr.parse()?,
-            Duration::from_secs(5),
-        ) {
+        let stream = match TcpStream::connect_timeout(&addr.parse()?, Duration::from_secs(5)) {
             Ok(s) => s,
             Err(e) => {
                 last_error = Some(Box::new(e));
@@ -34,12 +31,18 @@ fn attempt_stomp_connection(
         // Set timeouts for read/write operations
         if let Err(e) = stream.set_read_timeout(Some(Duration::from_secs(5))) {
             last_error = Some(Box::new(e));
-            eprintln!("  Failed to set read timeout: {}", last_error.as_ref().unwrap());
+            eprintln!(
+                "  Failed to set read timeout: {}",
+                last_error.as_ref().unwrap()
+            );
             continue;
         }
         if let Err(e) = stream.set_write_timeout(Some(Duration::from_secs(5))) {
             last_error = Some(Box::new(e));
-            eprintln!("  Failed to set write timeout: {}", last_error.as_ref().unwrap());
+            eprintln!(
+                "  Failed to set write timeout: {}",
+                last_error.as_ref().unwrap()
+            );
             continue;
         }
 
@@ -48,7 +51,10 @@ fn attempt_stomp_connection(
         let frame = "CONNECT\naccept-version:1.2\nhost:/\nlogin:guest\npasscode:guest\n\n\0";
         if let Err(e) = stream.write_all(frame.as_bytes()) {
             last_error = Some(Box::new(e));
-            eprintln!("  Failed to send CONNECT frame: {}", last_error.as_ref().unwrap());
+            eprintln!(
+                "  Failed to send CONNECT frame: {}",
+                last_error.as_ref().unwrap()
+            );
             if attempt < max_attempts {
                 sleep(Duration::from_millis(500));
             }
@@ -64,17 +70,17 @@ fn attempt_stomp_connection(
                     eprintln!("  ✓ Successfully connected to STOMP broker");
                     return Ok(());
                 } else {
-                    last_error = Some(format!(
-                        "Unexpected response from broker: {}",
-                        line.trim()
-                    )
-                    .into());
+                    last_error =
+                        Some(format!("Unexpected response from broker: {}", line.trim()).into());
                     eprintln!("  {}", last_error.as_ref().unwrap());
                 }
             }
             Err(e) => {
                 last_error = Some(Box::new(e));
-                eprintln!("  Failed to read response: {}", last_error.as_ref().unwrap());
+                eprintln!(
+                    "  Failed to read response: {}",
+                    last_error.as_ref().unwrap()
+                );
             }
         }
 
