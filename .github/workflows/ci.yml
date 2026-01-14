@@ -25,17 +25,59 @@ jobs:
             -p 5672:5672 -p 61613:61613 -p 15672:15672 \
             iridium-rabbitmq-stomp:ci
 
-      - name: Wait for STOMP port
+      - name: Wait for RabbitMQ to be ready
         run: |
           set -e
+          echo "Waiting for RabbitMQ management API and STOMP to be ready..."
+          
+          # First, wait for management API to be available (indicates RabbitMQ is starting)
           for i in $(seq 1 60); do
-            if (echo > /dev/tcp/localhost/61613) >/dev/null 2>&1; then
-              echo "STOMP port open"
+            if curl -sf -u guest:guest http://localhost:15672/api/overview >/dev/null 2>&1; then
+              echo "Management API is responding (attempt $i)"
               break
             fi
-            echo "waiting for STOMP port... ($i)"
+            if [ "$i" -eq 60 ]; then
+              echo "ERROR: Management API never became available"
+              docker logs iridium_rabbitmq_ci || true
+              exit 1
+            fi
+            echo "Waiting for management API... ($i/60)"
+            sleep 2
+          done
+          
+          # Now verify STOMP plugin is enabled and operational
+          for i in $(seq 1 30); do
+            PLUGINS=$(curl -sf -u guest:guest http://localhost:15672/api/plugins 2>/dev/null || echo "")
+            if echo "$PLUGINS" | grep -q '"name":"rabbitmq_stomp".*"enabled":true'; then
+              echo "STOMP plugin is enabled and running"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "ERROR: STOMP plugin never became enabled"
+              echo "Plugin status: $PLUGINS"
+              docker logs iridium_rabbitmq_ci || true
+              exit 1
+            fi
+            echo "Waiting for STOMP plugin to be enabled... ($i/30)"
+            sleep 2
+          done
+          
+          # Finally, verify STOMP port accepts connections
+          for i in $(seq 1 15); do
+            if (echo > /dev/tcp/localhost/61613) >/dev/null 2>&1; then
+              echo "STOMP port 61613 is accepting connections"
+              break
+            fi
+            if [ "$i" -eq 15 ]; then
+              echo "ERROR: STOMP port never accepted connections"
+              docker logs iridium_rabbitmq_ci || true
+              exit 1
+            fi
+            echo "Waiting for STOMP port to accept connections... ($i/15)"
             sleep 1
           done
+          
+          echo "✓ RabbitMQ with STOMP is fully ready"
 
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
