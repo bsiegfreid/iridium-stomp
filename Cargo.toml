@@ -12,7 +12,7 @@ documentation = "https://docs.rs/iridium-stomp"
 keywords = ["stomp", "async", "messaging", "tokio", "rabbitmq"]
 categories = ["network-programming", "asynchronous"]
 # Ensure docs files are packaged and instruct docs.rs to build with all features
-include = ["src/**", "Cargo.toml", "README.md", "LICENSE", "docs/**"]
+include = ["src/**", "examples/**", "docs/**", "Cargo.toml", "README.md", "LICENSE"]
 
 [package.metadata.docs.rs]
 all-features = true
