@@ -50,7 +50,8 @@ cargo test --test parser_unit       # Frame parsing edge cases
 cargo test --test codec_fuzz        # Randomized chunk splitting
 cargo test --test codec_stress      # Concurrent stress testing
 
-# Run smoke integration test (requires RabbitMQ)
+# Run smoke integration test locally (requires RabbitMQ and environment variable)
+# Note: The test is skipped by default unless RUN_STOMP_SMOKE=1 is set
 RUN_STOMP_SMOKE=1 cargo test --test stomp_smoke
 ```
 
