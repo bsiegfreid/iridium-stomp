@@ -43,7 +43,12 @@ API sketch
   2. In your client, `CONNECT` as usual and `subscribe` to the named queue:
 
 ```rust
-let conn = Connection::connect("127.0.0.1:61613", "guest", "guest", "0,0").await?;
+let conn = Connection::connect(
+    "127.0.0.1:61613",
+    "guest",
+    "guest",
+    Connection::DEFAULT_HEARTBEAT,
+).await?;
 let subscription = conn.subscribe("/queue/my-durable-queue", AckMode::Client).await?;
 ```
 
@@ -54,7 +59,20 @@ reconnects and re-subscribes to the same queue name.
 - Broker-specific durable header (ActiveMQ example):
 
 ```rust
-// ActiveMQ example (broker-specific headers) - not portable
+use iridium_stomp::{Connection, ConnectOptions};
+use iridium_stomp::connection::AckMode;
+
+// ActiveMQ requires client-id for durable subscriptions
+let options = ConnectOptions::new().client_id("my-durable-client");
+let conn = Connection::connect_with_options(
+    "activemq:61613",
+    "user",
+    "pass",
+    Connection::NO_HEARTBEAT,
+    options,
+).await?;
+
+// Set the durable subscription name header
 let headers = vec![("activemq.subscriptionName".to_string(), "my-durable".to_string())];
 let subscription = conn.subscribe_with_headers("/topic/foo", AckMode::Client, headers).await?;
 ```

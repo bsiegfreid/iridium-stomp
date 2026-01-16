@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-01-16
+
 ### Fixed
 
 - Implement header escaping per STOMP 1.2 spec ([#32], [#37])
@@ -41,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `Display` implementation for STOMP protocol format
 - `Frame::get_header()` helper method for retrieving header values
 
+### Changed
+
+- **Breaking**: `Connection::next_frame()` now returns `Option<ReceivedFrame>` instead of `Option<Frame>`. Use pattern matching to handle both normal frames and server errors.
+
 ## [0.1.0] - 2025-01-14
 
 ### Added
@@ -56,7 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Feature-gated CLI (`--features cli`)
 - Comprehensive test suite (150+ tests)
 
-[Unreleased]: https://github.com/bsiegfreid/iridium-stomp/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/bsiegfreid/iridium-stomp/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/bsiegfreid/iridium-stomp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/bsiegfreid/iridium-stomp/releases/tag/v0.1.0
 [#32]: https://github.com/bsiegfreid/iridium-stomp/issues/32
 [#33]: https://github.com/bsiegfreid/iridium-stomp/issues/33
