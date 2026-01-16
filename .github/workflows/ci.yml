@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+# Restrict permissions to minimum required (read-only for checkout)
+permissions:
+  contents: read
+
 jobs:
   smoke:
     name: Smoke integration test
