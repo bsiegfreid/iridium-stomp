@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ServerError` struct with `message`, `body`, `receipt_id`, and original frame
   - `Connection::next_frame()` now returns `Option<ReceivedFrame>` (**breaking change**)
   - Pattern matching enables type-safe error handling
+- Heartbeat configuration constants and builder ([#36])
+  - `Connection::NO_HEARTBEAT` constant for disabling heartbeats
+  - `Connection::DEFAULT_HEARTBEAT` constant for 10-second intervals
+  - `Heartbeat` struct for type-safe heartbeat configuration
+  - `Heartbeat::new()`, `Heartbeat::disabled()`, `Heartbeat::from_duration()` constructors
+  - `Display` implementation for STOMP protocol format
 - `Frame::get_header()` helper method for retrieving header values
 
 ## [0.1.0] - 2025-01-14
@@ -56,4 +62,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#33]: https://github.com/bsiegfreid/iridium-stomp/issues/33
 [#34]: https://github.com/bsiegfreid/iridium-stomp/issues/34
 [#35]: https://github.com/bsiegfreid/iridium-stomp/issues/35
+[#36]: https://github.com/bsiegfreid/iridium-stomp/issues/36
 [#37]: https://github.com/bsiegfreid/iridium-stomp/pull/37
