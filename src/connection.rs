@@ -11,6 +11,111 @@ use tokio_util::codec::Framed;
 use crate::codec::{StompCodec, StompItem};
 use crate::frame::Frame;
 
+/// Configuration for STOMP heartbeat intervals.
+///
+/// Provides a type-safe way to configure heartbeat values instead of using
+/// raw strings. The `Display` implementation formats the value as required
+/// by the STOMP protocol ("send_ms,receive_ms").
+///
+/// # Example
+///
+/// ```
+/// use iridium_stomp::Heartbeat;
+///
+/// // Create a custom heartbeat configuration
+/// let hb = Heartbeat::new(5000, 10000);
+/// assert_eq!(hb.to_string(), "5000,10000");
+///
+/// // Use predefined configurations
+/// assert_eq!(Heartbeat::disabled().to_string(), "0,0");
+/// assert_eq!(Heartbeat::default().to_string(), "10000,10000");
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Heartbeat {
+    /// Minimum interval (in milliseconds) between heartbeats the client can send.
+    /// A value of 0 means the client cannot send heartbeats.
+    pub send_ms: u32,
+
+    /// Minimum interval (in milliseconds) between heartbeats the client wants to receive.
+    /// A value of 0 means the client does not want to receive heartbeats.
+    pub receive_ms: u32,
+}
+
+impl Heartbeat {
+    /// Create a new heartbeat configuration with the specified intervals.
+    ///
+    /// # Arguments
+    ///
+    /// * `send_ms` - Minimum interval in milliseconds between heartbeats the client can send.
+    /// * `receive_ms` - Minimum interval in milliseconds between heartbeats the client wants to receive.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iridium_stomp::Heartbeat;
+    ///
+    /// let hb = Heartbeat::new(5000, 10000);
+    /// assert_eq!(hb.send_ms, 5000);
+    /// assert_eq!(hb.receive_ms, 10000);
+    /// ```
+    pub fn new(send_ms: u32, receive_ms: u32) -> Self {
+        Self {
+            send_ms,
+            receive_ms,
+        }
+    }
+
+    /// Create a heartbeat configuration that disables heartbeats entirely.
+    ///
+    /// This is equivalent to `Heartbeat::new(0, 0)`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iridium_stomp::Heartbeat;
+    ///
+    /// let hb = Heartbeat::disabled();
+    /// assert_eq!(hb.send_ms, 0);
+    /// assert_eq!(hb.receive_ms, 0);
+    /// assert_eq!(hb.to_string(), "0,0");
+    /// ```
+    pub fn disabled() -> Self {
+        Self::new(0, 0)
+    }
+
+    /// Create a heartbeat configuration from a Duration for symmetric heartbeats.
+    ///
+    /// Both send and receive intervals will be set to the same value.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iridium_stomp::Heartbeat;
+    /// use std::time::Duration;
+    ///
+    /// let hb = Heartbeat::from_duration(Duration::from_secs(15));
+    /// assert_eq!(hb.send_ms, 15000);
+    /// assert_eq!(hb.receive_ms, 15000);
+    /// ```
+    pub fn from_duration(interval: Duration) -> Self {
+        let ms = interval.as_millis() as u32;
+        Self::new(ms, ms)
+    }
+}
+
+impl Default for Heartbeat {
+    /// Returns the default heartbeat configuration: 10 seconds for both send and receive.
+    fn default() -> Self {
+        Self::new(10000, 10000)
+    }
+}
+
+impl std::fmt::Display for Heartbeat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{},{}", self.send_ms, self.receive_ms)
+    }
+}
+
 /// Internal subscription entry stored for each destination.
 #[derive(Clone)]
 pub(crate) struct SubscriptionEntry {
@@ -388,6 +493,41 @@ pub struct Connection {
 }
 
 impl Connection {
+    /// Heartbeat value that disables heartbeats entirely.
+    ///
+    /// Use this when you don't want the client or server to send heartbeats.
+    /// Note that some brokers may still require heartbeats for long-lived connections.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let conn = Connection::connect(
+    ///     "localhost:61613",
+    ///     "guest",
+    ///     "guest",
+    ///     Connection::NO_HEARTBEAT,
+    /// ).await?;
+    /// ```
+    pub const NO_HEARTBEAT: &'static str = "0,0";
+
+    /// Default heartbeat value: 10 seconds for both send and receive.
+    ///
+    /// This is a reasonable default for most applications. The actual heartbeat
+    /// interval will be negotiated with the server (taking the maximum of client
+    /// and server preferences).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let conn = Connection::connect(
+    ///     "localhost:61613",
+    ///     "guest",
+    ///     "guest",
+    ///     Connection::DEFAULT_HEARTBEAT,
+    /// ).await?;
+    /// ```
+    pub const DEFAULT_HEARTBEAT: &'static str = "10000,10000";
+
     /// Establish a connection to the STOMP server at `addr` with the given
     /// credentials and heartbeat header string (e.g. "10000,10000").
     ///
