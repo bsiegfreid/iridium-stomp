@@ -162,3 +162,21 @@ fn heartbeat_one_millisecond() {
     let hb = Heartbeat::new(1, 1);
     assert_eq!(hb.to_string(), "1,1");
 }
+
+#[test]
+fn heartbeat_from_duration_saturates_at_u32_max() {
+    // Test that Duration values larger than u32::MAX milliseconds are clamped
+    // Duration::from_secs(5_000_000) = 5,000,000,000 ms which exceeds u32::MAX (4,294,967,295)
+    let hb = Heartbeat::from_duration(Duration::from_secs(5_000_000));
+    assert_eq!(hb.send_ms, u32::MAX);
+    assert_eq!(hb.receive_ms, u32::MAX);
+}
+
+#[test]
+fn heartbeat_from_duration_at_max_boundary() {
+    // Test Duration at exactly u32::MAX milliseconds
+    let max_ms = u32::MAX as u64;
+    let hb = Heartbeat::from_duration(Duration::from_millis(max_ms));
+    assert_eq!(hb.send_ms, u32::MAX);
+    assert_eq!(hb.receive_ms, u32::MAX);
+}
