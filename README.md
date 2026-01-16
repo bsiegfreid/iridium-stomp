@@ -68,7 +68,7 @@ iridium-stomp = { git = "https://github.com/bsiegfreid/iridium-stomp", branch = 
 
 ## Quick Start
 
-```rust
+```rust,no_run
 use iridium_stomp::{Connection, Frame};
 
 #[tokio::main]
@@ -110,7 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 Heartbeats are negotiated automatically during connection. Pass your desired
 intervals in the `heart-beat` format (`send,receive` in milliseconds):
 
-```rust
+```rust,ignore
 // Client wants to send heartbeats every 10 seconds
 // and receive them every 10 seconds
 let conn = Connection::connect(addr, login, pass, "10000,10000").await?;
@@ -124,7 +124,7 @@ connection if the server stops responding.
 
 Subscribe to destinations with automatic resubscription on reconnect:
 
-```rust
+```rust,ignore
 use iridium_stomp::connection::AckMode;
 
 // Auto-acknowledge (server considers delivered immediately)
@@ -139,8 +139,9 @@ let sub = conn.subscribe("/queue/tasks", AckMode::ClientIndividual).await?;
 
 For broker-specific headers (durable subscriptions, selectors, etc.):
 
-```rust
+```rust,ignore
 use iridium_stomp::SubscriptionOptions;
+use iridium_stomp::connection::AckMode;
 
 let options = SubscriptionOptions {
     headers: vec![
@@ -158,7 +159,7 @@ let sub = conn.subscribe_with_options("/topic/events", AckMode::Client, options)
 The `Connection` is cloneable and thread-safe. Multiple tasks can share the
 same connection:
 
-```rust
+```rust,ignore
 let conn = Connection::connect(...).await?;
 let conn2 = conn.clone();
 
@@ -197,7 +198,7 @@ stomp -s /queue/orders -s /queue/notifications
 
 Interactive commands:
 
-```
+```text
 > send /queue/test Hello, World!
 Sent to /queue/test
 
