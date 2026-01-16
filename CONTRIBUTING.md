@@ -8,21 +8,30 @@ Quick developer guide
 
 This file contains the developer-facing instructions for running tests, examples, and CI-equivalent checks locally. If you are changing code, run these checks before opening a pull request.
 
-Run these commands from the repository root:
+### Pre-submission checklist
+
+**Before submitting a PR, always run these commands** from the repository root:
 
 ```bash
-# Formatting (check only)
+# 1. Format code (this will auto-fix formatting issues)
+cargo fmt --all
+
+# 2. Verify formatting is correct
 cargo fmt --all -- --check
 
-# Lints (CI uses -D warnings)
+# 3. Run lints (CI uses -D warnings)
 cargo clippy --all-targets --all-features -- -D warnings
 
-# Unit tests
+# 4. Run unit tests
 cargo test --lib
 
-# Build examples (quick sanity check)
+# 5. Build examples (quick sanity check)
 cargo build --examples
+```
 
+Optional but recommended:
+
+```bash
 # Run the quickstart example (optional)
 cargo run --example quickstart
 

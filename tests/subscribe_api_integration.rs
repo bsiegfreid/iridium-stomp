@@ -19,19 +19,19 @@ fn test_subscribe_api_returns_stream_type() {
     // This test validates at compile-time that Subscription implements Stream.
     // The presence of StreamExt methods like `next()` proves the Stream trait
     // is correctly implemented.
-    
+
     use futures::stream::Stream;
-    
+
     // Type assertion: Subscription must implement Stream<Item = Frame>
     fn assert_is_stream<T: Stream>(_: T) {}
-    
+
     // This wouldn't compile if Subscription didn't implement Stream.
     // Since we can't create a real connection in a unit test without a broker,
     // we use a type-level assertion instead.
     fn check_subscription_is_stream(sub: iridium_stomp::Subscription) {
         assert_is_stream(sub);
     }
-    
+
     // If this test compiles, it proves Subscription implements Stream
     let _ = check_subscription_is_stream;
 }
@@ -45,19 +45,19 @@ fn test_stream_api_usage_pattern() {
     //
     // This pattern is shown in the README and examples, proving the
     // Stream trait is implemented and usable.
-    
+
     // This code demonstrates the expected API shape
     async fn example_usage() {
         // Pseudo-code showing the API pattern
         // let conn = Connection::connect(...).await?;
         // let mut subscription = conn.subscribe("/queue/test", AckMode::Auto).await?;
-        // 
+        //
         // // Use as a Stream
         // while let Some(frame) = subscription.next().await {
         //     println!("Received: {:?}", frame);
         // }
     }
-    
+
     let _ = example_usage;
 }
 
@@ -74,7 +74,7 @@ fn test_subscription_options_durable_queue() {
         durable_queue: Some("/queue/durable-events".to_string()),
         headers: vec![],
     };
-    
+
     assert_eq!(
         opts.durable_queue,
         Some("/queue/durable-events".to_string()),
@@ -91,25 +91,38 @@ fn test_subscription_options_broker_specific_headers() {
     let opts = SubscriptionOptions {
         durable_queue: None,
         headers: vec![
-            ("activemq.subscriptionName".to_string(), "my-durable-sub".to_string()),
+            (
+                "activemq.subscriptionName".to_string(),
+                "my-durable-sub".to_string(),
+            ),
             ("selector".to_string(), "priority > 5".to_string()),
             ("activemq.noLocal".to_string(), "true".to_string()),
         ],
     };
-    
-    assert_eq!(opts.headers.len(), 3, "Should support multiple custom headers");
-    
+
+    assert_eq!(
+        opts.headers.len(),
+        3,
+        "Should support multiple custom headers"
+    );
+
     // Verify headers are preserved
     assert!(
-        opts.headers.iter().any(|(k, v)| k == "activemq.subscriptionName" && v == "my-durable-sub"),
+        opts.headers
+            .iter()
+            .any(|(k, v)| k == "activemq.subscriptionName" && v == "my-durable-sub"),
         "Should include activemq.subscriptionName for durable subscriptions"
     );
     assert!(
-        opts.headers.iter().any(|(k, v)| k == "selector" && v == "priority > 5"),
+        opts.headers
+            .iter()
+            .any(|(k, v)| k == "selector" && v == "priority > 5"),
         "Should include selector for message filtering"
     );
     assert!(
-        opts.headers.iter().any(|(k, v)| k == "activemq.noLocal" && v == "true"),
+        opts.headers
+            .iter()
+            .any(|(k, v)| k == "activemq.noLocal" && v == "true"),
         "Should include noLocal option"
     );
 }
@@ -122,13 +135,13 @@ fn test_subscription_options_ergonomics() {
     let default_opts = SubscriptionOptions::default();
     assert!(default_opts.headers.is_empty());
     assert!(default_opts.durable_queue.is_none());
-    
+
     // Clone should preserve all fields
     let opts = SubscriptionOptions {
         durable_queue: Some("/queue/test".to_string()),
         headers: vec![("key".to_string(), "value".to_string())],
     };
-    
+
     let cloned = opts.clone();
     assert_eq!(opts.durable_queue, cloned.durable_queue);
     assert_eq!(opts.headers, cloned.headers);
@@ -140,7 +153,7 @@ fn test_subscription_options_ergonomics() {
 fn test_subscribe_with_options_api_exists() {
     // This test validates at compile-time that the subscribe_with_options
     // API exists and accepts SubscriptionOptions
-    
+
     async fn validate_api() {
         // Pseudo-code showing the API signature
         // let conn = Connection::connect(...).await?;
@@ -151,7 +164,7 @@ fn test_subscribe_with_options_api_exists() {
         //     opts
         // ).await?;
     }
-    
+
     let _ = validate_api;
 }
 
@@ -166,7 +179,7 @@ fn test_ack_mode_variants() {
     let auto = AckMode::Auto;
     let client = AckMode::Client;
     let client_individual = AckMode::ClientIndividual;
-    
+
     // Verify they are distinct
     assert_ne!(auto, client);
     assert_ne!(client, client_individual);
@@ -178,7 +191,7 @@ fn test_ack_mode_variants() {
 fn test_subscribe_accepts_ack_mode() {
     // This test validates at compile-time that subscribe methods
     // accept an AckMode parameter
-    
+
     async fn validate_subscribe_api() {
         // Pseudo-code showing the API signatures
         // let conn = Connection::connect(...).await?;
@@ -201,7 +214,7 @@ fn test_subscribe_accepts_ack_mode() {
         //     opts
         // ).await?;
     }
-    
+
     let _ = validate_subscribe_api;
 }
 
@@ -210,7 +223,7 @@ fn test_subscribe_accepts_ack_mode() {
 fn test_subscription_ack_nack_methods() {
     // This test validates at compile-time that Subscription provides
     // ack() and nack() methods for message acknowledgement
-    
+
     async fn validate_ack_api() {
         // Pseudo-code showing the ack/nack API
         // let subscription = conn.subscribe(...).await?;
@@ -221,7 +234,7 @@ fn test_subscription_ack_nack_methods() {
         // // Negative-acknowledge a message
         // subscription.nack("message-id-456").await?;
     }
-    
+
     let _ = validate_ack_api;
 }
 
@@ -229,11 +242,11 @@ fn test_subscription_ack_nack_methods() {
 #[test]
 fn test_ack_mode_traits() {
     let mode = AckMode::Client;
-    
+
     // AckMode implements Copy, so assignment copies the value
     let copied = mode;
     assert_eq!(mode, copied);
-    
+
     // Debug formatting
     let debug_str = format!("{:?}", mode);
     assert!(debug_str.contains("Client"));
@@ -250,7 +263,7 @@ fn test_readme_example_compiles() {
     async fn readme_example() {
         // This is adapted from the README Quick Start example
         // If this compiles, the documented API is accurate
-        
+
         // let conn = Connection::connect(
         //     "127.0.0.1:61613",
         //     "guest",
@@ -269,7 +282,7 @@ fn test_readme_example_compiles() {
         //     println!("Received: {:?}", frame);
         // }
     }
-    
+
     let _ = readme_example;
 }
 
@@ -278,7 +291,7 @@ fn test_readme_example_compiles() {
 fn test_durable_subscription_example_compiles() {
     async fn durable_example() {
         // This is adapted from the README durable subscription example
-        
+
         // let opts = SubscriptionOptions {
         //     headers: vec![
         //         ("activemq.subscriptionName".into(), "my-durable-sub".into()),
@@ -293,7 +306,7 @@ fn test_durable_subscription_example_compiles() {
         //     opts
         // ).await?;
     }
-    
+
     let _ = durable_example;
 }
 
@@ -302,13 +315,13 @@ fn test_durable_subscription_example_compiles() {
 fn test_client_ack_pattern_compiles() {
     async fn client_ack_example() {
         // This is adapted from the README
-        
+
         // let mut sub = conn.subscribe("/queue/jobs", AckMode::Client).await?;
         //
         // use futures::StreamExt;
         // while let Some(frame) = sub.next().await {
         //     // Process message
-        //     
+        //
         //     // Extract message-id for acknowledgement
         //     if let Some((_, msg_id)) = frame.headers.iter()
         //         .find(|(k, _)| k.to_lowercase() == "message-id") {
@@ -316,6 +329,6 @@ fn test_client_ack_pattern_compiles() {
         //     }
         // }
     }
-    
+
     let _ = client_ack_example;
 }
