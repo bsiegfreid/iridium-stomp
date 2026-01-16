@@ -50,6 +50,17 @@ impl Frame {
         self.body = body.into();
         self
     }
+
+    /// Get the value of a header by name.
+    ///
+    /// Returns the first header value matching the given key (case-sensitive),
+    /// or `None` if no such header exists.
+    pub fn get_header(&self, key: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    }
 }
 
 impl fmt::Display for Frame {

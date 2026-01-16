@@ -1,4 +1,43 @@
 // Slice-based STOMP frame parser (produces owned Vecs from input slices)
+
+/// Unescape a STOMP 1.2 header value.
+///
+/// Per STOMP 1.2 spec, the following escape sequences are supported:
+/// - `\r` → carriage return (0x0d)
+/// - `\n` → line feed (0x0a)
+/// - `\c` → colon (0x3a)
+/// - `\\` → backslash (0x5c)
+///
+/// Returns an error if an invalid escape sequence is encountered.
+pub fn unescape_header_value(input: &[u8]) -> Result<Vec<u8>, String> {
+    let mut result = Vec::with_capacity(input.len());
+    let mut i = 0;
+    while i < input.len() {
+        if input[i] == b'\\' {
+            if i + 1 >= input.len() {
+                return Err("incomplete escape sequence at end of header value".to_string());
+            }
+            match input[i + 1] {
+                b'\\' => result.push(b'\\'),
+                b'n' => result.push(b'\n'),
+                b'r' => result.push(b'\r'),
+                b'c' => result.push(b':'),
+                other => {
+                    return Err(format!(
+                        "invalid escape sequence '\\{}' in header value",
+                        other as char
+                    ));
+                }
+            }
+            i += 2;
+        } else {
+            result.push(input[i]);
+            i += 1;
+        }
+    }
+    Ok(result)
+}
+
 /// Minimal helper: extract optional content-length header value from a header list.
 ///
 /// Returns:
