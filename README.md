@@ -69,7 +69,7 @@ iridium-stomp = { git = "https://github.com/bsiegfreid/iridium-stomp", branch = 
 ## Quick Start
 
 ```rust,no_run
-use iridium_stomp::{Connection, Frame};
+use iridium_stomp::{Connection, Frame, ReceivedFrame};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -78,7 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "127.0.0.1:61613",
         "guest",
         "guest",
-        "10000,10000"  // heartbeat: send every 10s, expect every 10s
+        Connection::DEFAULT_HEARTBEAT,  // 10 seconds send/receive
     ).await?;
 
     // Send a message
@@ -89,7 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Subscribe to a queue
     let mut subscription = conn
-        .subscribe("/queue/test", iridium_stomp::connection::AckMode::Auto)
+        .subscribe("/queue/test", iridium_stomp::AckMode::Auto)
         .await?;
 
     // Receive messages using the Stream trait
@@ -107,13 +107,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Heartbeat Negotiation
 
-Heartbeats are negotiated automatically during connection. Pass your desired
-intervals in the `heart-beat` format (`send,receive` in milliseconds):
+Heartbeats are negotiated automatically during connection. Use the provided
+constants or the `Heartbeat` struct for type-safe configuration:
 
 ```rust,ignore
-// Client wants to send heartbeats every 10 seconds
-// and receive them every 10 seconds
-let conn = Connection::connect(addr, login, pass, "10000,10000").await?;
+use iridium_stomp::{Connection, Heartbeat};
+
+// Use predefined constants
+let conn = Connection::connect(addr, login, pass, Connection::DEFAULT_HEARTBEAT).await?;
+let conn = Connection::connect(addr, login, pass, Connection::NO_HEARTBEAT).await?;
+
+// Or use the Heartbeat struct for custom intervals
+let hb = Heartbeat::new(5000, 10000);  // send every 5s, expect every 10s
+let conn = Connection::connect(addr, login, pass, &hb.to_string()).await?;
+
+// Create from Duration for symmetric intervals
+use std::time::Duration;
+let hb = Heartbeat::from_duration(Duration::from_secs(15));
 ```
 
 The library handles the negotiation (taking the maximum of client and server
@@ -166,6 +176,77 @@ let conn2 = conn.clone();
 tokio::spawn(async move {
     conn2.send_frame(some_frame).await.unwrap();
 });
+```
+
+### Custom CONNECT Headers
+
+Use `ConnectOptions` to customize the STOMP CONNECT frame for broker-specific
+requirements like durable subscriptions or virtual hosts:
+
+```rust,ignore
+use iridium_stomp::{Connection, ConnectOptions};
+
+let options = ConnectOptions::new()
+    .client_id("my-durable-client")     // Required for ActiveMQ durable subscriptions
+    .host("/production")                 // Virtual host (RabbitMQ)
+    .accept_version("1.1,1.2")          // Version negotiation
+    .header("custom-key", "value");     // Broker-specific headers
+
+let conn = Connection::connect_with_options(
+    "localhost:61613",
+    "guest",
+    "guest",
+    Connection::DEFAULT_HEARTBEAT,
+    options,
+).await?;
+```
+
+### Receipt Confirmation
+
+Request delivery confirmation from the broker using RECEIPT frames:
+
+```rust,ignore
+use iridium_stomp::{Connection, Frame};
+use std::time::Duration;
+
+let msg = Frame::new("SEND")
+    .header("destination", "/queue/important")
+    .receipt("msg-123")  // Request receipt with this ID
+    .set_body(b"critical data".to_vec());
+
+// Send and wait for confirmation (with timeout)
+conn.send_frame_confirmed(msg, Duration::from_secs(5)).await?;
+
+// Or handle receipts manually
+let msg = Frame::new("SEND")
+    .header("destination", "/queue/test")
+    .receipt("msg-456")
+    .set_body(b"data".to_vec());
+conn.send_frame_with_receipt(msg).await?;
+conn.wait_for_receipt("msg-456", Duration::from_secs(5)).await?;
+```
+
+### Error Handling
+
+Server errors are surfaced as first-class types for type-safe handling:
+
+```rust,ignore
+use iridium_stomp::{Connection, ReceivedFrame};
+
+while let Some(received) = conn.next_frame().await {
+    match received {
+        ReceivedFrame::Frame(frame) => {
+            println!("Got {}: {:?}", frame.command, frame.get_header("destination"));
+        }
+        ReceivedFrame::Error(err) => {
+            eprintln!("Server error: {}", err.message);
+            if let Some(body) = &err.body {
+                eprintln!("Details: {}", body);
+            }
+            break;
+        }
+    }
+}
 ```
 
 ## CLI

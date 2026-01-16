@@ -70,7 +70,12 @@ recommended pattern is:
    // create a small runtime for the example and unwrap results for simplicity
    let rt = Runtime::new().expect("create tokio runtime");
    rt.block_on(async {
-     let conn = Connection::connect("127.0.0.1:61613", "guest", "guest", "10000,10000").await.unwrap();
+     let conn = Connection::connect(
+       "127.0.0.1:61613",
+       "guest",
+       "guest",
+       Connection::DEFAULT_HEARTBEAT,
+     ).await.unwrap();
 
      let opts = SubscriptionOptions {
        durable_queue: Some("/queue/my-app-queue".to_string()),
@@ -111,23 +116,28 @@ In `iridium-stomp` you can pass the per-subscription durable header via
 `SubscriptionOptions.headers` so the library will forward it on `SUBSCRIBE`
 and persist it for resubscribe on reconnect.
 
-Example (conceptual):
+Example:
 
    ```rust
-   use iridium_stomp::{Connection, SubscriptionOptions};
+   use iridium_stomp::{Connection, ConnectOptions, SubscriptionOptions};
    use iridium_stomp::connection::AckMode;
    use tokio::runtime::Runtime;
 
    // create a small runtime for the example and unwrap results for simplicity
    let rt = Runtime::new().expect("create tokio runtime");
    rt.block_on(async {
-     // NOTE: ActiveMQ requires a `client-id` on CONNECT to make subscriptions
-     // durable. At the moment `Connection::connect` does not expose a client-id
-     // argument; you can (a) configure the broker to associate durability with
-     // another identifier, or (b) we can add a small API later to pass connect
-     // headers. See "Next steps" below.
+     // ActiveMQ requires a `client-id` on CONNECT to make subscriptions durable.
+     // Use ConnectOptions to set the client-id:
+     let connect_opts = ConnectOptions::new()
+       .client_id("my-durable-client");
 
-     let conn = Connection::connect("activemq-host:61613", "user", "pass", "0,0").await.unwrap();
+     let conn = Connection::connect_with_options(
+       "activemq-host:61613",
+       "user",
+       "pass",
+       Connection::NO_HEARTBEAT,
+       connect_opts,
+     ).await.unwrap();
 
      let mut headers = Vec::new();
      // Example header — consult ActiveMQ STOMP docs for the exact header name
@@ -146,11 +156,6 @@ Example (conceptual):
    ```
 
 Important caveats:
-- Durable-topic subscriptions on ActiveMQ normally require a `client-id`
-  on the `CONNECT` frame. Right now, `Connection::connect` does not accept
-  arbitrary connect headers. If you rely on ActiveMQ durable-topic
-  semantics, we should add support for passing `client-id` and/or other
-  connect-time headers (see "Next steps").
 - Header names for durable subscriptions are broker-specific — consult your
   broker's STOMP documentation.
 
@@ -163,19 +168,17 @@ Resubscribe behavior
 subscriber workflows simpler: when you reconnect, the crate will attempt to
 recreate your subscriptions with the same headers and ids.
 
-Next steps and recommendations
-------------------------------
+Recommendations
+---------------
 
 - For RabbitMQ durability, prefer creating named durable queues bound to
   exchanges and subscribe to the named queue via
   `SubscriptionOptions.durable_queue`. Document the queue binding and
   persistent publishing policies in your app's deployment instructions.
 
-- For ActiveMQ durable topic semantics, we should add support for passing
-  connect-time headers (for example `client-id`) so users can take full
-  advantage of broker-provided durable subscriptions. I will add an
-  integration test target for ActiveMQ to the project's TODO list so we can
-  validate the exact headers required and ensure end-to-end behavior.
+- For ActiveMQ durable topic semantics, use `ConnectOptions` to set the
+  `client-id` header on CONNECT, and `SubscriptionOptions` to set the
+  durable subscription name header on SUBSCRIBE.
 
 - If you need richer broker-specific automation (for example creating
   durable queues and bindings programmatically), consider an adapter or a
