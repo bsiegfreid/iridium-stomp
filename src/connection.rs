@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::net::TcpStream;
-use tokio::sync::{Mutex, broadcast, mpsc};
+use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
 use tokio_util::codec::Framed;
 
 use crate::codec::{StompCodec, StompItem};
@@ -30,6 +30,9 @@ pub(crate) type PendingMap = HashMap<String, VecDeque<(String, Frame)>>;
 /// Internal type for resubscribe snapshot entries: (destination, id, ack, headers)
 pub(crate) type ResubEntry = (String, String, String, Vec<(String, String)>);
 
+/// Alias for pending receipt map: receipt-id -> oneshot sender to notify when received.
+pub(crate) type PendingReceipts = HashMap<String, oneshot::Sender<()>>;
+
 /// Errors returned by `Connection` operations.
 #[derive(Error, Debug)]
 pub enum ConnError {
@@ -39,6 +42,9 @@ pub enum ConnError {
     /// Protocol-level error
     #[error("protocol error: {0}")]
     Protocol(String),
+    /// Receipt timeout error
+    #[error("receipt timeout: no RECEIPT received for '{0}' within timeout")]
+    ReceiptTimeout(String),
 }
 
 /// Subscription acknowledgement modes as defined by STOMP 1.2.
@@ -141,6 +147,12 @@ pub struct Connection {
     /// For `client-individual` the ACK/NACK applies only to the single
     /// message.
     pending: Arc<Mutex<PendingMap>>,
+    /// Pending receipt confirmations.
+    ///
+    /// When a frame is sent with a `receipt` header, the receipt-id is stored
+    /// here with a oneshot sender. When the server responds with a RECEIPT
+    /// frame, the sender is notified.
+    pending_receipts: Arc<Mutex<PendingReceipts>>,
 }
 
 impl Connection {
@@ -170,6 +182,8 @@ impl Connection {
         let (shutdown_tx, _) = broadcast::channel::<()>(1);
         let pending: Arc<Mutex<PendingMap>> = Arc::new(Mutex::new(HashMap::new()));
         let pending_clone = pending.clone();
+        let pending_receipts: Arc<Mutex<PendingReceipts>> = Arc::new(Mutex::new(HashMap::new()));
+        let pending_receipts_clone = pending_receipts.clone();
 
         let addr = addr.to_string();
         let login = login.to_string();
@@ -388,6 +402,16 @@ impl Connection {
                                                         vec.retain(|entry| entry.sender.try_send(f.clone()).is_ok());
                                                     }
                                                 }
+                                            } else if f.command == "RECEIPT" {
+                                                // Handle RECEIPT frame: notify any waiting callers
+                                                if let Some(receipt_id) = f.get_header("receipt-id") {
+                                                    let mut receipts = pending_receipts_clone.lock().await;
+                                                    if let Some(sender) = receipts.remove(receipt_id) {
+                                                        let _ = sender.send(());
+                                                    }
+                                                }
+                                                // Don't forward RECEIPT frames to inbound channel
+                                                continue;
                                             }
 
                                             let _ = in_tx.send(f).await;
@@ -436,6 +460,7 @@ impl Connection {
             subscriptions,
             sub_id_counter,
             pending,
+            pending_receipts,
         })
     }
 
@@ -449,6 +474,164 @@ impl Connection {
             .send(StompItem::Frame(frame))
             .await
             .map_err(|_| ConnError::Protocol("send channel closed".into()))
+    }
+
+    /// Send a frame with a receipt request and return the receipt ID.
+    ///
+    /// This method adds a unique `receipt` header to the frame and registers
+    /// the receipt ID for tracking. Use `wait_for_receipt()` to wait for the
+    /// server's RECEIPT response.
+    ///
+    /// # Parameters
+    /// - `frame`: the frame to send. A `receipt` header will be added.
+    ///
+    /// # Returns
+    /// The generated receipt ID that can be used with `wait_for_receipt()`.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let receipt_id = conn.send_frame_with_receipt(frame).await?;
+    /// conn.wait_for_receipt(&receipt_id, Duration::from_secs(5)).await?;
+    /// ```
+    pub async fn send_frame_with_receipt(&self, frame: Frame) -> Result<String, ConnError> {
+        use std::sync::atomic::AtomicU64;
+        use std::sync::atomic::Ordering::SeqCst;
+
+        // Generate a unique receipt ID using a static counter
+        static RECEIPT_COUNTER: AtomicU64 = AtomicU64::new(1);
+        let receipt_id = format!("rcpt-{}", RECEIPT_COUNTER.fetch_add(1, SeqCst));
+
+        // Create the oneshot channel for notification
+        let (tx, _rx) = oneshot::channel();
+
+        // Register the pending receipt
+        {
+            let mut receipts = self.pending_receipts.lock().await;
+            receipts.insert(receipt_id.clone(), tx);
+        }
+
+        // Add receipt header and send the frame
+        let frame_with_receipt = frame.receipt(&receipt_id);
+        self.send_frame(frame_with_receipt).await?;
+
+        Ok(receipt_id)
+    }
+
+    /// Wait for a receipt confirmation from the server.
+    ///
+    /// This method blocks until the server sends a RECEIPT frame with the
+    /// matching receipt-id, or until the timeout expires.
+    ///
+    /// # Parameters
+    /// - `receipt_id`: the receipt ID returned by `send_frame_with_receipt()`.
+    /// - `timeout`: maximum time to wait for the receipt.
+    ///
+    /// # Returns
+    /// `Ok(())` if the receipt was received, or `Err(ConnError::ReceiptTimeout)`
+    /// if the timeout expired.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let receipt_id = conn.send_frame_with_receipt(frame).await?;
+    /// conn.wait_for_receipt(&receipt_id, Duration::from_secs(5)).await?;
+    /// println!("Message confirmed!");
+    /// ```
+    pub async fn wait_for_receipt(
+        &self,
+        receipt_id: &str,
+        timeout: Duration,
+    ) -> Result<(), ConnError> {
+        // Get the receiver for this receipt
+        let rx = {
+            let mut receipts = self.pending_receipts.lock().await;
+            // Re-create the oneshot channel and swap out the sender
+            let (tx, rx) = oneshot::channel();
+            if let Some(old_tx) = receipts.insert(receipt_id.to_string(), tx) {
+                // Drop the old sender - this is expected if called after send_frame_with_receipt
+                drop(old_tx);
+            }
+            rx
+        };
+
+        // Wait for the receipt with timeout
+        match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(_)) => {
+                // Channel was closed without receiving - connection likely dropped
+                Err(ConnError::Protocol(
+                    "receipt channel closed unexpectedly".into(),
+                ))
+            }
+            Err(_) => {
+                // Timeout expired - clean up the pending receipt
+                let mut receipts = self.pending_receipts.lock().await;
+                receipts.remove(receipt_id);
+                Err(ConnError::ReceiptTimeout(receipt_id.to_string()))
+            }
+        }
+    }
+
+    /// Send a frame and wait for server confirmation via RECEIPT.
+    ///
+    /// This is a convenience method that combines `send_frame_with_receipt()`
+    /// and `wait_for_receipt()`. Use this when you want to ensure a frame
+    /// was processed by the server before continuing.
+    ///
+    /// # Parameters
+    /// - `frame`: the frame to send.
+    /// - `timeout`: maximum time to wait for the receipt.
+    ///
+    /// # Returns
+    /// `Ok(())` if the frame was sent and receipt confirmed, or an error if
+    /// sending failed or the receipt timed out.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let frame = Frame::new("SEND")
+    ///     .header("destination", "/queue/orders")
+    ///     .set_body(b"order data".to_vec());
+    ///
+    /// conn.send_frame_confirmed(frame, Duration::from_secs(5)).await?;
+    /// println!("Order sent and confirmed!");
+    /// ```
+    pub async fn send_frame_confirmed(
+        &self,
+        frame: Frame,
+        timeout: Duration,
+    ) -> Result<(), ConnError> {
+        // Generate receipt ID and register before sending
+        use std::sync::atomic::AtomicU64;
+        use std::sync::atomic::Ordering::SeqCst;
+
+        static RECEIPT_COUNTER: AtomicU64 = AtomicU64::new(1);
+        let receipt_id = format!("rcpt-{}", RECEIPT_COUNTER.fetch_add(1, SeqCst));
+
+        // Create the oneshot channel for notification
+        let (tx, rx) = oneshot::channel();
+
+        // Register the pending receipt before sending
+        {
+            let mut receipts = self.pending_receipts.lock().await;
+            receipts.insert(receipt_id.clone(), tx);
+        }
+
+        // Add receipt header and send the frame
+        let frame_with_receipt = frame.receipt(&receipt_id);
+        self.send_frame(frame_with_receipt).await?;
+
+        // Wait for the receipt with timeout
+        match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(_)) => Err(ConnError::Protocol(
+                "receipt channel closed unexpectedly".into(),
+            )),
+            Err(_) => {
+                // Timeout expired - clean up
+                let mut receipts = self.pending_receipts.lock().await;
+                receipts.remove(&receipt_id);
+                Err(ConnError::ReceiptTimeout(receipt_id))
+            }
+        }
     }
 
     /// Subscribe to a destination.
@@ -868,6 +1051,7 @@ mod tests {
             subscriptions: subscriptions.clone(),
             sub_id_counter,
             pending: pending.clone(),
+            pending_receipts: Arc::new(Mutex::new(HashMap::new())),
         };
 
         // ack m2 cumulatively: should remove m1 and m2, leaving m3
@@ -945,6 +1129,7 @@ mod tests {
             subscriptions: subscriptions.clone(),
             sub_id_counter,
             pending: pending.clone(),
+            pending_receipts: Arc::new(Mutex::new(HashMap::new())),
         };
 
         // ack only 'b' individually
@@ -989,6 +1174,7 @@ mod tests {
             subscriptions: subscriptions.clone(),
             sub_id_counter,
             pending: pending.clone(),
+            pending_receipts: Arc::new(Mutex::new(HashMap::new())),
         };
 
         // subscribe
@@ -1043,6 +1229,7 @@ mod tests {
             subscriptions: subscriptions.clone(),
             sub_id_counter,
             pending: pending.clone(),
+            pending_receipts: Arc::new(Mutex::new(HashMap::new())),
         };
 
         // subscribe with client ack
@@ -1104,6 +1291,7 @@ mod tests {
             subscriptions,
             sub_id_counter,
             pending,
+            pending_receipts: Arc::new(Mutex::new(HashMap::new())),
         };
 
         (conn, out_rx)

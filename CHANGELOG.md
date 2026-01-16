@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- RECEIPT frame support for delivery confirmation ([#33])
+  - `Frame::receipt()` builder method for requesting receipts
+  - `Connection::send_frame_with_receipt()` to send with tracking
+  - `Connection::wait_for_receipt()` to await confirmation with timeout
+  - `Connection::send_frame_confirmed()` convenience method
+  - `ConnError::ReceiptTimeout` error variant for timeout handling
 - `Frame::get_header()` helper method for retrieving header values
 
 ## [0.1.0] - 2025-01-14
@@ -35,4 +41,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [Unreleased]: https://github.com/bsiegfreid/iridium-stomp/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/bsiegfreid/iridium-stomp/releases/tag/v0.1.0
 [#32]: https://github.com/bsiegfreid/iridium-stomp/issues/32
+[#33]: https://github.com/bsiegfreid/iridium-stomp/issues/33
 [#37]: https://github.com/bsiegfreid/iridium-stomp/pull/37

@@ -51,6 +51,29 @@ impl Frame {
         self
     }
 
+    /// Request a receipt for this frame (builder style).
+    ///
+    /// When sent, the server will respond with a RECEIPT frame containing
+    /// the same receipt ID. Use this with `Connection::wait_for_receipt()`
+    /// to confirm delivery.
+    ///
+    /// Parameters
+    /// - `id`: the receipt identifier. Must be unique per connection.
+    ///
+    /// Returns the mutated `Frame` allowing builder-style chaining.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let frame = Frame::new("SEND")
+    ///     .header("destination", "/queue/test")
+    ///     .receipt("msg-001")
+    ///     .set_body(b"hello".to_vec());
+    /// ```
+    pub fn receipt(self, id: impl Into<String>) -> Self {
+        self.header("receipt", id)
+    }
+
     /// Get the value of a header by name.
     ///
     /// Returns the first header value matching the given key (case-sensitive),

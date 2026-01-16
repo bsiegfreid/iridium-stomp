@@ -13,8 +13,10 @@ pub mod subscription;
 /// `tokio_util::codec::Framed` and tests.
 pub use codec::{StompCodec, StompItem};
 
-/// Re-export the high-level `Connection`, `AckMode`, and the heartbeat helper functions.
-pub use connection::{AckMode, Connection, negotiate_heartbeats, parse_heartbeat_header};
+/// Re-export the high-level `Connection`, `AckMode`, `ConnError`, and the heartbeat helper functions.
+pub use connection::{
+    AckMode, ConnError, Connection, negotiate_heartbeats, parse_heartbeat_header,
+};
 
 /// Re-export the `Frame` type used to construct/send and receive frames.
 pub use frame::Frame;
