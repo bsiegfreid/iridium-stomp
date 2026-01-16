@@ -131,26 +131,31 @@ fn connect_options_debug() {
 
 #[test]
 fn connect_options_empty_client_id() {
-    // Empty client-id is technically valid (though likely not useful)
+    // Empty values are accepted by the builder - validation is deferred to the broker.
+    // This design allows maximum flexibility; invalid values will be rejected at
+    // connection time by the STOMP broker.
     let opts = ConnectOptions::default().client_id("");
     assert_eq!(opts.client_id, Some(String::new()));
 }
 
 #[test]
 fn connect_options_empty_host() {
+    // Empty host accepted by builder; broker will reject if invalid
     let opts = ConnectOptions::default().host("");
     assert_eq!(opts.host, Some(String::new()));
 }
 
 #[test]
 fn connect_options_header_empty_value() {
+    // Empty header values are valid per STOMP spec
     let opts = ConnectOptions::default().header("key", "");
     assert_eq!(opts.headers[0], ("key".to_string(), String::new()));
 }
 
 #[test]
 fn connect_options_header_empty_key() {
-    // Empty key is technically allowed by the builder
+    // Empty keys are accepted by the builder but would be invalid STOMP.
+    // Validation is deferred to the broker for simplicity.
     let opts = ConnectOptions::default().header("", "value");
     assert_eq!(opts.headers[0], (String::new(), "value".to_string()));
 }
@@ -196,3 +201,16 @@ fn connect_options_multiple_custom_headers() {
 
     assert_eq!(opts.headers.len(), 3);
 }
+
+// ============================================================================
+// Documentation: Critical header protection
+// ============================================================================
+//
+// Note: Custom headers that would override critical STOMP CONNECT headers
+// (accept-version, host, login, passcode, heart-beat, client-id) are silently
+// ignored at connection time. This is enforced in Connection::connect_with_options(),
+// not in ConnectOptions itself. The builder accepts any header but the connection
+// logic filters them.
+//
+// This design allows ConnectOptions to be a simple data container while the
+// Connection enforces protocol safety.

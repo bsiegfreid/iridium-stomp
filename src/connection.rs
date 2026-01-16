@@ -71,6 +71,20 @@ impl AckMode {
 /// headers, specify supported STOMP versions, or configure broker-specific
 /// options like `client-id` for durable subscriptions.
 ///
+/// # Validation
+///
+/// This struct performs minimal validation. Values are passed to the broker
+/// as-is, and invalid configurations will be rejected by the broker at
+/// connection time. Empty strings are technically accepted but may cause
+/// broker-specific errors.
+///
+/// # Custom Headers
+///
+/// Custom headers added via `header()` cannot override critical STOMP headers
+/// (`accept-version`, `host`, `login`, `passcode`, `heart-beat`, `client-id`).
+/// Such headers are silently ignored. Use the dedicated builder methods to
+/// set these values.
+///
 /// # Example
 ///
 /// ```ignore
@@ -102,6 +116,7 @@ pub struct ConnectOptions {
     pub host: Option<String>,
 
     /// Additional custom headers to include in the CONNECT frame.
+    /// Note: Headers that would override critical STOMP headers are ignored.
     pub headers: Vec<(String, String)>,
 }
 
@@ -347,9 +362,21 @@ impl Connection {
                             connect = connect.header("client-id", cid);
                         }
 
-                        // Add any custom headers
+                        // Add any custom headers, skipping any that would override
+                        // critical STOMP CONNECT headers already set above
                         for (key, value) in &custom_headers {
-                            connect = connect.header(key, value);
+                            let dominated = matches!(
+                                key.to_ascii_lowercase().as_str(),
+                                "accept-version"
+                                    | "host"
+                                    | "login"
+                                    | "passcode"
+                                    | "heart-beat"
+                                    | "client-id"
+                            );
+                            if !dominated {
+                                connect = connect.header(key, value);
+                            }
                         }
 
                         if framed.send(StompItem::Frame(connect)).await.is_err() {
