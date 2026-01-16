@@ -87,6 +87,10 @@ impl Heartbeat {
     ///
     /// Both send and receive intervals will be set to the same value.
     ///
+    /// The maximum supported Duration is approximately 49.7 days (u32::MAX milliseconds,
+    /// or 4,294,967,295 ms). If a larger Duration is provided, it will be clamped to
+    /// u32::MAX milliseconds to prevent overflow.
+    ///
     /// # Example
     ///
     /// ```
@@ -98,7 +102,7 @@ impl Heartbeat {
     /// assert_eq!(hb.receive_ms, 15000);
     /// ```
     pub fn from_duration(interval: Duration) -> Self {
-        let ms = interval.as_millis() as u32;
+        let ms = interval.as_millis().min(u32::MAX as u128) as u32;
         Self::new(ms, ms)
     }
 }
