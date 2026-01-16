@@ -3,7 +3,28 @@ use std::io;
 use tokio_util::codec::{Decoder, Encoder};
 
 use crate::frame::Frame;
-use crate::parser::parse_frame_slice;
+use crate::parser::{parse_frame_slice, unescape_header_value};
+
+/// Escape a STOMP 1.2 header value for wire transmission.
+///
+/// Per STOMP 1.2 spec, the following characters must be escaped:
+/// - backslash (0x5c) → `\\`
+/// - carriage return (0x0d) → `\r`
+/// - line feed (0x0a) → `\n`
+/// - colon (0x3a) → `\c` (primarily for header names, but we escape in values too for safety)
+fn escape_header_value(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '\\' => result.push_str("\\\\"),
+            '\r' => result.push_str("\\r"),
+            '\n' => result.push_str("\\n"),
+            ':' => result.push_str("\\c"),
+            _ => result.push(ch),
+        }
+    }
+    result
+}
 
 /// (parser-based implementation uses `src` directly; header parsing is
 /// delegated to the `parser` module.)
@@ -86,15 +107,30 @@ impl Decoder for StompCodec {
                     )
                 })?;
                 // convert headers Vec<(Vec<u8>,Vec<u8>)> -> Vec<(String,String)>
+                // and unescape per STOMP 1.2 spec
                 let mut hdrs: Vec<(String, String)> = Vec::new();
                 for (k, v) in headers {
-                    let ks = String::from_utf8(k).map_err(|e| {
+                    // Unescape header key
+                    let k_unescaped = unescape_header_value(&k).map_err(|e| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("invalid escape in header key: {}", e),
+                        )
+                    })?;
+                    let ks = String::from_utf8(k_unescaped).map_err(|e| {
                         io::Error::new(
                             io::ErrorKind::InvalidData,
                             format!("invalid utf8 in header key: {}", e),
                         )
                     })?;
-                    let vs = String::from_utf8(v).map_err(|e| {
+                    // Unescape header value
+                    let v_unescaped = unescape_header_value(&v).map_err(|e| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("invalid escape in header value: {}", e),
+                        )
+                    })?;
+                    let vs = String::from_utf8(v_unescaped).map_err(|e| {
                         io::Error::new(
                             io::ErrorKind::InvalidData,
                             format!("invalid utf8 in header value: {}", e),
@@ -159,9 +195,12 @@ impl Encoder<StompItem> for StompCodec {
                 }
 
                 for (k, v) in headers {
-                    dst.extend_from_slice(k.as_bytes());
+                    // Escape header name and value per STOMP 1.2 spec
+                    let escaped_key = escape_header_value(&k);
+                    let escaped_val = escape_header_value(&v);
+                    dst.extend_from_slice(escaped_key.as_bytes());
                     dst.put_u8(b':');
-                    dst.extend_from_slice(v.as_bytes());
+                    dst.extend_from_slice(escaped_val.as_bytes());
                     dst.put_u8(b'\n');
                 }
 
