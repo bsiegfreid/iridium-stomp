@@ -225,15 +225,14 @@ fn test_subscription_ack_nack_methods() {
     let _ = validate_ack_api;
 }
 
-/// Test AckMode can be cloned and compared.
+/// Test AckMode can be copied and compared.
 #[test]
 fn test_ack_mode_traits() {
     let mode = AckMode::Client;
     
-    // Clone (AckMode implements Copy, but let's be explicit about Clone)
-    #[allow(clippy::clone_on_copy)]
-    let cloned = mode.clone();
-    assert_eq!(mode, cloned);
+    // AckMode implements Copy, so assignment copies the value
+    let copied = mode;
+    assert_eq!(mode, copied);
     
     // Debug formatting
     let debug_str = format!("{:?}", mode);
