@@ -1,4 +1,4 @@
-use iridium_stomp::{Connection, Frame};
+use iridium_stomp::{Connection, Frame, ReceivedFrame};
 use std::time::Duration;
 
 #[tokio::main]
@@ -16,7 +16,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Try to read one incoming frame (if any), but don't block forever — time out after 5s.
     match tokio::time::timeout(Duration::from_secs(5), conn.next_frame()).await {
-        Ok(Some(frame)) => println!("received frame:\n{}", frame),
+        Ok(Some(ReceivedFrame::Frame(frame))) => println!("received frame:\n{}", frame),
+        Ok(Some(ReceivedFrame::Error(err))) => println!("server error: {}", err),
         Ok(None) => println!("connection closed, no frames received"),
         Err(_) => println!("timed out waiting for a frame"),
     }

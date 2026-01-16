@@ -47,6 +47,146 @@ pub enum ConnError {
     ReceiptTimeout(String),
 }
 
+/// Represents an ERROR frame received from the STOMP server.
+///
+/// STOMP servers send ERROR frames to indicate protocol violations, authentication
+/// failures, or other server-side errors. After sending an ERROR frame, the server
+/// typically closes the connection.
+///
+/// # Example
+///
+/// ```ignore
+/// use iridium_stomp::ReceivedFrame;
+///
+/// while let Some(received) = conn.next_frame().await {
+///     match received {
+///         ReceivedFrame::Frame(frame) => {
+///             // Normal message processing
+///         }
+///         ReceivedFrame::Error(err) => {
+///             eprintln!("Server error: {}", err.message);
+///             if let Some(body) = &err.body {
+///                 eprintln!("Details: {}", body);
+///             }
+///             break;
+///         }
+///     }
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerError {
+    /// The error message from the `message` header.
+    pub message: String,
+
+    /// The error body, if present. Contains additional error details.
+    pub body: Option<String>,
+
+    /// The receipt-id if this error is in response to a specific frame.
+    pub receipt_id: Option<String>,
+
+    /// The original ERROR frame for access to additional headers.
+    pub frame: Frame,
+}
+
+impl ServerError {
+    /// Create a `ServerError` from an ERROR frame.
+    ///
+    /// This is primarily used internally but is public for testing and
+    /// advanced use cases where you need to construct a `ServerError` manually.
+    pub fn from_frame(frame: Frame) -> Self {
+        let message = frame
+            .get_header("message")
+            .unwrap_or("unknown error")
+            .to_string();
+
+        let body = if frame.body.is_empty() {
+            None
+        } else {
+            String::from_utf8(frame.body.clone()).ok()
+        };
+
+        let receipt_id = frame.get_header("receipt-id").map(|s| s.to_string());
+
+        Self {
+            message,
+            body,
+            receipt_id,
+            frame,
+        }
+    }
+}
+
+impl std::fmt::Display for ServerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "STOMP server error: {}", self.message)?;
+        if let Some(body) = &self.body {
+            write!(f, " - {}", body)?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for ServerError {}
+
+/// The result of receiving a frame from the server.
+///
+/// STOMP servers can send either normal frames (MESSAGE, RECEIPT, etc.) or
+/// ERROR frames indicating a problem. This enum allows callers to handle
+/// both cases with pattern matching.
+///
+/// # Example
+///
+/// ```ignore
+/// use iridium_stomp::ReceivedFrame;
+///
+/// match conn.next_frame().await {
+///     Some(ReceivedFrame::Frame(frame)) => {
+///         println!("Got frame: {}", frame.command);
+///     }
+///     Some(ReceivedFrame::Error(err)) => {
+///         eprintln!("Server error: {}", err);
+///     }
+///     None => {
+///         println!("Connection closed");
+///     }
+/// }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReceivedFrame {
+    /// A normal STOMP frame (MESSAGE, RECEIPT, etc.)
+    Frame(Frame),
+    /// An ERROR frame from the server
+    Error(ServerError),
+}
+
+impl ReceivedFrame {
+    /// Returns `true` if this is an error frame.
+    pub fn is_error(&self) -> bool {
+        matches!(self, ReceivedFrame::Error(_))
+    }
+
+    /// Returns `true` if this is a normal frame.
+    pub fn is_frame(&self) -> bool {
+        matches!(self, ReceivedFrame::Frame(_))
+    }
+
+    /// Returns the frame if this is a normal frame, or `None` if it's an error.
+    pub fn into_frame(self) -> Option<Frame> {
+        match self {
+            ReceivedFrame::Frame(f) => Some(f),
+            ReceivedFrame::Error(_) => None,
+        }
+    }
+
+    /// Returns the error if this is an error frame, or `None` if it's a normal frame.
+    pub fn into_error(self) -> Option<ServerError> {
+        match self {
+            ReceivedFrame::Frame(_) => None,
+            ReceivedFrame::Error(e) => Some(e),
+        }
+    }
+}
+
 /// Subscription acknowledgement modes as defined by STOMP 1.2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AckMode {
@@ -1116,13 +1256,39 @@ impl Connection {
         self.send_transaction_frame("ABORT", transaction_id).await
     }
 
-    pub async fn next_frame(&self) -> Option<Frame> {
-        // Receive the next inbound `Frame` produced by the background reader
-        // task. Returns `Some(Frame)` when available or `None` if the inbound
-        // channel has been closed. We lock the receiver so cloned handles can
-        // safely await concurrently (they serialize on the mutex).
+    /// Receive the next frame from the server.
+    ///
+    /// Returns `Some(ReceivedFrame::Frame(..))` for normal frames (MESSAGE, etc.),
+    /// `Some(ReceivedFrame::Error(..))` for ERROR frames, or `None` if the
+    /// connection has been closed.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use iridium_stomp::ReceivedFrame;
+    ///
+    /// while let Some(received) = conn.next_frame().await {
+    ///     match received {
+    ///         ReceivedFrame::Frame(frame) => {
+    ///             println!("Got {}: {:?}", frame.command, frame.body);
+    ///         }
+    ///         ReceivedFrame::Error(err) => {
+    ///             eprintln!("Server error: {}", err);
+    ///             break;
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    pub async fn next_frame(&self) -> Option<ReceivedFrame> {
         let mut rx = self.inbound_rx.lock().await;
-        rx.recv().await
+        let frame = rx.recv().await?;
+
+        // Convert ERROR frames to ServerError for better ergonomics
+        if frame.command == "ERROR" {
+            Some(ReceivedFrame::Error(ServerError::from_frame(frame)))
+        } else {
+            Some(ReceivedFrame::Frame(frame))
+        }
     }
 
     pub async fn close(self) {
