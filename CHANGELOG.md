@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Configurable `host` header for virtual hosts
   - Configurable `accept-version` for STOMP version negotiation
   - Custom headers support for broker-specific requirements
+- ERROR frames surfaced as first-class type ([#35])
+  - `ReceivedFrame` enum distinguishes normal frames from errors
+  - `ServerError` struct with `message`, `body`, `receipt_id`, and original frame
+  - `Connection::next_frame()` now returns `Option<ReceivedFrame>` (**breaking change**)
+  - Pattern matching enables type-safe error handling
 - `Frame::get_header()` helper method for retrieving header values
 
 ## [0.1.0] - 2025-01-14
@@ -50,4 +55,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#32]: https://github.com/bsiegfreid/iridium-stomp/issues/32
 [#33]: https://github.com/bsiegfreid/iridium-stomp/issues/33
 [#34]: https://github.com/bsiegfreid/iridium-stomp/issues/34
+[#35]: https://github.com/bsiegfreid/iridium-stomp/issues/35
 [#37]: https://github.com/bsiegfreid/iridium-stomp/pull/37
