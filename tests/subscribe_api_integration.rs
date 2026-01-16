@@ -5,8 +5,7 @@
 //!
 //! This test validates the high-level subscribe API public interface.
 
-use iridium_stomp::connection::AckMode;
-use iridium_stomp::SubscriptionOptions;
+use iridium_stomp::{AckMode, SubscriptionOptions};
 
 // =============================================================================
 // Acceptance Criteria 1: API to subscribe and receive a Stream
@@ -231,8 +230,9 @@ fn test_subscription_ack_nack_methods() {
 fn test_ack_mode_traits() {
     let mode = AckMode::Client;
     
-    // Clone
-    let cloned = mode;
+    // Clone (AckMode implements Copy, but let's be explicit about Clone)
+    #[allow(clippy::clone_on_copy)]
+    let cloned = mode.clone();
     assert_eq!(mode, cloned);
     
     // Debug formatting
