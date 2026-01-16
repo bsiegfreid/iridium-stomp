@@ -65,6 +65,83 @@ impl AckMode {
     }
 }
 
+/// Options for customizing the STOMP CONNECT frame.
+///
+/// Use this struct with `Connection::connect_with_options()` to set custom
+/// headers, specify supported STOMP versions, or configure broker-specific
+/// options like `client-id` for durable subscriptions.
+///
+/// # Example
+///
+/// ```ignore
+/// use iridium_stomp::{Connection, ConnectOptions};
+///
+/// let options = ConnectOptions::default()
+///     .client_id("my-durable-client")
+///     .host("my-vhost")
+///     .header("custom-header", "value");
+///
+/// let conn = Connection::connect_with_options(
+///     "localhost:61613",
+///     "guest",
+///     "guest",
+///     "10000,10000",
+///     options,
+/// ).await?;
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct ConnectOptions {
+    /// STOMP version(s) to accept (e.g., "1.2" or "1.0,1.1,1.2").
+    /// Defaults to "1.2" if not set.
+    pub accept_version: Option<String>,
+
+    /// Client ID for durable subscriptions (required by ActiveMQ, etc.).
+    pub client_id: Option<String>,
+
+    /// Virtual host header value. Defaults to "/" if not set.
+    pub host: Option<String>,
+
+    /// Additional custom headers to include in the CONNECT frame.
+    pub headers: Vec<(String, String)>,
+}
+
+impl ConnectOptions {
+    /// Create a new `ConnectOptions` with default values.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the STOMP version(s) to accept (builder style).
+    ///
+    /// Examples: "1.2", "1.1,1.2", "1.0,1.1,1.2"
+    pub fn accept_version(mut self, version: impl Into<String>) -> Self {
+        self.accept_version = Some(version.into());
+        self
+    }
+
+    /// Set the client ID for durable subscriptions (builder style).
+    ///
+    /// Required by some brokers (e.g., ActiveMQ) for durable topic subscriptions.
+    pub fn client_id(mut self, id: impl Into<String>) -> Self {
+        self.client_id = Some(id.into());
+        self
+    }
+
+    /// Set the virtual host (builder style).
+    ///
+    /// Defaults to "/" if not set.
+    pub fn host(mut self, host: impl Into<String>) -> Self {
+        self.host = Some(host.into());
+        self
+    }
+
+    /// Add a custom header to the CONNECT frame (builder style).
+    pub fn header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers.push((key.into(), value.into()));
+        self
+    }
+}
+
 /// Parse the STOMP `heart-beat` header value (format: "cx,cy").
 ///
 /// Parameters
@@ -159,6 +236,9 @@ impl Connection {
     /// Establish a connection to the STOMP server at `addr` with the given
     /// credentials and heartbeat header string (e.g. "10000,10000").
     ///
+    /// This is a convenience wrapper around `connect_with_options()` that uses
+    /// default options (STOMP 1.2, host="/", no client-id).
+    ///
     /// Parameters
     /// - `addr`: TCP address (host:port) of the STOMP server.
     /// - `login`: login username for STOMP `CONNECT`.
@@ -175,6 +255,48 @@ impl Connection {
         passcode: &str,
         client_hb: &str,
     ) -> Result<Self, ConnError> {
+        Self::connect_with_options(addr, login, passcode, client_hb, ConnectOptions::default())
+            .await
+    }
+
+    /// Establish a connection to the STOMP server with custom options.
+    ///
+    /// Use this method when you need to set a custom `client-id` (for durable
+    /// subscriptions), specify a virtual host, negotiate different STOMP
+    /// versions, or add custom CONNECT headers.
+    ///
+    /// Parameters
+    /// - `addr`: TCP address (host:port) of the STOMP server.
+    /// - `login`: login username for STOMP `CONNECT`.
+    /// - `passcode`: passcode for STOMP `CONNECT`.
+    /// - `client_hb`: client's `heart-beat` header value ("cx,cy" in
+    ///   milliseconds) that will be sent in the `CONNECT` frame.
+    /// - `options`: custom connection options (version, host, client-id, etc.).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use iridium_stomp::{Connection, ConnectOptions};
+    ///
+    /// // Connect with a client-id for durable subscriptions
+    /// let options = ConnectOptions::default()
+    ///     .client_id("my-app-instance-1");
+    ///
+    /// let conn = Connection::connect_with_options(
+    ///     "localhost:61613",
+    ///     "guest",
+    ///     "guest",
+    ///     "10000,10000",
+    ///     options,
+    /// ).await?;
+    /// ```
+    pub async fn connect_with_options(
+        addr: &str,
+        login: &str,
+        passcode: &str,
+        client_hb: &str,
+        options: ConnectOptions,
+    ) -> Result<Self, ConnError> {
         let (out_tx, mut out_rx) = mpsc::channel::<StompItem>(32);
         let (in_tx, in_rx) = mpsc::channel::<Frame>(32);
         let subscriptions: Arc<Mutex<Subscriptions>> = Arc::new(Mutex::new(HashMap::new()));
@@ -189,6 +311,12 @@ impl Connection {
         let login = login.to_string();
         let passcode = passcode.to_string();
         let client_hb = client_hb.to_string();
+
+        // Extract options into owned values for the spawned task
+        let accept_version = options.accept_version.unwrap_or_else(|| "1.2".to_string());
+        let host = options.host.unwrap_or_else(|| "/".to_string());
+        let client_id = options.client_id;
+        let custom_headers = options.headers;
 
         let shutdown_tx_clone = shutdown_tx.clone();
         let subscriptions_clone = subscriptions.clone();
@@ -208,11 +336,21 @@ impl Connection {
                         let mut framed = Framed::new(stream, StompCodec::new());
 
                         let mut connect = Frame::new("CONNECT");
-                        connect = connect.header("accept-version", "1.2");
-                        connect = connect.header("host", "/");
+                        connect = connect.header("accept-version", &accept_version);
+                        connect = connect.header("host", &host);
                         connect = connect.header("login", &login);
                         connect = connect.header("passcode", &passcode);
                         connect = connect.header("heart-beat", &client_hb);
+
+                        // Add client-id if specified
+                        if let Some(ref cid) = client_id {
+                            connect = connect.header("client-id", cid);
+                        }
+
+                        // Add any custom headers
+                        for (key, value) in &custom_headers {
+                            connect = connect.header(key, value);
+                        }
 
                         if framed.send(StompItem::Frame(connect)).await.is_err() {
                             tokio::time::sleep(Duration::from_secs(backoff_secs)).await;

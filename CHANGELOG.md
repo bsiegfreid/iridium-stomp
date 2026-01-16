@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `Connection::wait_for_receipt()` to await confirmation with timeout
   - `Connection::send_frame_confirmed()` convenience method
   - `ConnError::ReceiptTimeout` error variant for timeout handling
+- Custom CONNECT headers and version negotiation support ([#34])
+  - `ConnectOptions` struct with builder methods for customizing connection
+  - `Connection::connect_with_options()` for advanced connection setup
+  - Support for `client-id` header (required for ActiveMQ durable subscriptions)
+  - Configurable `host` header for virtual hosts
+  - Configurable `accept-version` for STOMP version negotiation
+  - Custom headers support for broker-specific requirements
 - `Frame::get_header()` helper method for retrieving header values
 
 ## [0.1.0] - 2025-01-14
@@ -42,4 +49,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.0]: https://github.com/bsiegfreid/iridium-stomp/releases/tag/v0.1.0
 [#32]: https://github.com/bsiegfreid/iridium-stomp/issues/32
 [#33]: https://github.com/bsiegfreid/iridium-stomp/issues/33
+[#34]: https://github.com/bsiegfreid/iridium-stomp/issues/34
 [#37]: https://github.com/bsiegfreid/iridium-stomp/pull/37
