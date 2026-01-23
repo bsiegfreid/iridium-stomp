@@ -154,6 +154,13 @@ pub enum ConnError {
     /// Receipt timeout error
     #[error("receipt timeout: no RECEIPT received for '{0}' within timeout")]
     ReceiptTimeout(String),
+    /// Server rejected the connection (e.g., authentication failure)
+    ///
+    /// This error is returned when the server sends an ERROR frame in response
+    /// to the CONNECT frame. Common causes include invalid credentials,
+    /// unauthorized access, or broker configuration issues.
+    #[error("server rejected connection: {0}")]
+    ServerRejected(ServerError),
 }
 
 /// Represents an ERROR frame received from the STOMP server.
@@ -572,6 +579,14 @@ impl Connection {
     ///   milliseconds) that will be sent in the `CONNECT` frame.
     /// - `options`: custom connection options (version, host, client-id, etc.).
     ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The TCP connection cannot be established (`ConnError::Io`)
+    /// - The server rejects the connection, e.g., due to invalid credentials
+    ///   (`ConnError::ServerRejected`)
+    /// - The server closes the connection without responding (`ConnError::Protocol`)
+    ///
     /// # Example
     ///
     /// ```ignore
@@ -617,288 +632,309 @@ impl Connection {
         let client_id = options.client_id;
         let custom_headers = options.headers;
 
+        // Perform initial connection and STOMP handshake before spawning background task.
+        // This ensures authentication errors are returned to the caller immediately.
+        let stream = TcpStream::connect(&addr).await?;
+        let mut framed = Framed::new(stream, StompCodec::new());
+
+        // Build and send CONNECT frame
+        let connect = Self::build_connect_frame(
+            &accept_version,
+            &host,
+            &login,
+            &passcode,
+            &client_hb,
+            &client_id,
+            &custom_headers,
+        );
+
+        framed
+            .send(StompItem::Frame(connect))
+            .await
+            .map_err(|e| ConnError::Io(std::io::Error::other(e)))?;
+
+        // Wait for CONNECTED or ERROR response
+        let server_heartbeat = Self::await_connected_response(&mut framed).await?;
+
+        // Calculate heartbeat intervals
+        let (cx, cy) = parse_heartbeat_header(&client_hb);
+        let (sx, sy) = parse_heartbeat_header(&server_heartbeat);
+        let (send_interval, recv_interval) = negotiate_heartbeats(cx, cy, sx, sy);
+
+        // Now spawn background task for ongoing I/O and reconnection
         let shutdown_tx_clone = shutdown_tx.clone();
         let subscriptions_clone = subscriptions.clone();
 
         tokio::spawn(async move {
             let mut backoff_secs: u64 = 1;
+
+            // Use the already-established connection for the first iteration
+            let mut current_framed = Some(framed);
+            let mut current_send_interval = send_interval;
+            let mut current_recv_interval = recv_interval;
+
             loop {
                 let mut shutdown_sub = shutdown_tx_clone.subscribe();
 
+                // Check for shutdown before attempting connection
                 tokio::select! {
+                    biased;
                     _ = shutdown_sub.recv() => break,
                     _ = future::ready(()) => {},
                 }
 
-                match TcpStream::connect(&addr).await {
-                    Ok(stream) => {
-                        let mut framed = Framed::new(stream, StompCodec::new());
+                // Either use existing connection or establish new one (reconnect)
+                let framed = if let Some(f) = current_framed.take() {
+                    f
+                } else {
+                    // Reconnection attempt
+                    match TcpStream::connect(&addr).await {
+                        Ok(stream) => {
+                            let mut framed = Framed::new(stream, StompCodec::new());
 
-                        let mut connect = Frame::new("CONNECT");
-                        connect = connect.header("accept-version", &accept_version);
-                        connect = connect.header("host", &host);
-                        connect = connect.header("login", &login);
-                        connect = connect.header("passcode", &passcode);
-                        connect = connect.header("heart-beat", &client_hb);
-
-                        // Add client-id if specified
-                        if let Some(ref cid) = client_id {
-                            connect = connect.header("client-id", cid);
-                        }
-
-                        // Add any custom headers, skipping any that would override
-                        // critical STOMP CONNECT headers already set above
-                        for (key, value) in &custom_headers {
-                            let dominated = matches!(
-                                key.to_ascii_lowercase().as_str(),
-                                "accept-version"
-                                    | "host"
-                                    | "login"
-                                    | "passcode"
-                                    | "heart-beat"
-                                    | "client-id"
+                            let connect = Self::build_connect_frame(
+                                &accept_version,
+                                &host,
+                                &login,
+                                &passcode,
+                                &client_hb,
+                                &client_id,
+                                &custom_headers,
                             );
-                            if !dominated {
-                                connect = connect.header(key, value);
+
+                            if framed.send(StompItem::Frame(connect)).await.is_err() {
+                                tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+                                backoff_secs = (backoff_secs * 2).min(30);
+                                continue;
+                            }
+
+                            // Wait for CONNECTED (on reconnect, silently retry on ERROR)
+                            match Self::await_connected_response(&mut framed).await {
+                                Ok(server_hb) => {
+                                    let (cx, cy) = parse_heartbeat_header(&client_hb);
+                                    let (sx, sy) = parse_heartbeat_header(&server_hb);
+                                    let (si, ri) = negotiate_heartbeats(cx, cy, sx, sy);
+                                    current_send_interval = si;
+                                    current_recv_interval = ri;
+                                    framed
+                                }
+                                Err(_) => {
+                                    // Reconnect failed (auth error or other), retry with backoff
+                                    tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+                                    backoff_secs = (backoff_secs * 2).min(30);
+                                    continue;
+                                }
                             }
                         }
-
-                        if framed.send(StompItem::Frame(connect)).await.is_err() {
+                        Err(_) => {
                             tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
                             backoff_secs = (backoff_secs * 2).min(30);
                             continue;
                         }
+                    }
+                };
 
-                        let mut server_heartbeat = "0,0".to_string();
-                        loop {
-                            tokio::select! {
-                                _ = shutdown_sub.recv() => break,
-                                item = framed.next() => {
-                                    match item {
-                                        Some(Ok(StompItem::Heartbeat)) => {}
-                                        Some(Ok(StompItem::Frame(f))) => {
-                                            if f.command == "CONNECTED" {
-                                                for (k, v) in &f.headers {
-                                                    if k.to_lowercase() == "heart-beat" { server_heartbeat = v.clone(); }
-                                                }
-                                                break;
+                let (send_interval, recv_interval) = (current_send_interval, current_recv_interval);
+
+                let last_received = Arc::new(AtomicU64::new(current_millis()));
+                let writer_last_sent = Arc::new(AtomicU64::new(current_millis()));
+
+                let (mut sink, mut stream) = framed.split();
+                let in_tx = in_tx.clone();
+                let subscriptions = subscriptions_clone.clone();
+
+                // Clear pending message map on reconnect — messages that were
+                // outstanding before the disconnect are considered lost and
+                // will be redelivered by the server as appropriate.
+                {
+                    let mut p = pending_clone.lock().await;
+                    p.clear();
+                }
+
+                // Resubscribe any existing subscriptions after reconnect.
+                // We snapshot the subscription entries while holding the lock
+                // and then issue SUBSCRIBE frames using the sink.
+                let subs_snapshot: Vec<ResubEntry> = {
+                    let map = subscriptions.lock().await;
+                    let mut v: Vec<ResubEntry> = Vec::new();
+                    for (dest, vec) in map.iter() {
+                        for entry in vec.iter() {
+                            v.push((
+                                dest.clone(),
+                                entry.id.clone(),
+                                entry.ack.clone(),
+                                entry.headers.clone(),
+                            ));
+                        }
+                    }
+                    v
+                };
+
+                for (dest, id, ack, headers) in subs_snapshot {
+                    let mut sf = Frame::new("SUBSCRIBE");
+                    sf = sf
+                        .header("id", &id)
+                        .header("destination", &dest)
+                        .header("ack", &ack);
+                    for (k, v) in headers {
+                        sf = sf.header(&k, &v);
+                    }
+                    let _ = sink.send(StompItem::Frame(sf)).await;
+                }
+
+                let mut hb_tick = match send_interval {
+                    Some(d) => tokio::time::interval(d),
+                    None => tokio::time::interval(Duration::from_secs(86400)),
+                };
+                let watchdog_half = recv_interval.map(|d| d / 2);
+
+                backoff_secs = 1;
+
+                'conn: loop {
+                    tokio::select! {
+                        _ = shutdown_sub.recv() => { let _ = sink.close().await; break 'conn; }
+                        maybe = out_rx.recv() => {
+                            match maybe {
+                                Some(item) => if sink.send(item).await.is_err() { break 'conn } else { writer_last_sent.store(current_millis(), Ordering::SeqCst); }
+                                None => break 'conn,
+                            }
+                        }
+                        item = stream.next() => {
+                            match item {
+                                Some(Ok(StompItem::Heartbeat)) => { last_received.store(current_millis(), Ordering::SeqCst); }
+                                Some(Ok(StompItem::Frame(f))) => {
+                                    last_received.store(current_millis(), Ordering::SeqCst);
+                                    // Dispatch MESSAGE frames to any matching subscribers.
+                                    if f.command == "MESSAGE" {
+                                        // try to find destination, subscription and message-id headers
+                                        let mut dest_opt: Option<String> = None;
+                                        let mut sub_opt: Option<String> = None;
+                                        let mut msg_id_opt: Option<String> = None;
+                                        for (k, v) in &f.headers {
+                                            let kl = k.to_lowercase();
+                                            if kl == "destination" {
+                                                dest_opt = Some(v.clone());
+                                            } else if kl == "subscription" {
+                                                sub_opt = Some(v.clone());
+                                            } else if kl == "message-id" {
+                                                msg_id_opt = Some(v.clone());
                                             }
                                         }
-                                        _ => break,
-                                    }
-                                }
-                            }
-                        }
 
-                        let (cx, cy) = parse_heartbeat_header(&client_hb);
-                        let (sx, sy) = parse_heartbeat_header(&server_heartbeat);
-                        let (send_interval, recv_interval) = negotiate_heartbeats(cx, cy, sx, sy);
-
-                        let last_received = Arc::new(AtomicU64::new(current_millis()));
-                        let writer_last_sent = Arc::new(AtomicU64::new(current_millis()));
-
-                        let (mut sink, mut stream) = framed.split();
-                        let in_tx = in_tx.clone();
-                        let subscriptions = subscriptions_clone.clone();
-
-                        // Clear pending message map on reconnect — messages that were
-                        // outstanding before the disconnect are considered lost and
-                        // will be redelivered by the server as appropriate.
-                        {
-                            let mut p = pending_clone.lock().await;
-                            p.clear();
-                        }
-
-                        // Resubscribe any existing subscriptions after reconnect.
-                        // We snapshot the subscription entries while holding the lock
-                        // and then issue SUBSCRIBE frames using the sink.
-                        let subs_snapshot: Vec<ResubEntry> = {
-                            let map = subscriptions.lock().await;
-                            let mut v: Vec<ResubEntry> = Vec::new();
-                            for (dest, vec) in map.iter() {
-                                for entry in vec.iter() {
-                                    v.push((
-                                        dest.clone(),
-                                        entry.id.clone(),
-                                        entry.ack.clone(),
-                                        entry.headers.clone(),
-                                    ));
-                                }
-                            }
-                            v
-                        };
-
-                        for (dest, id, ack, headers) in subs_snapshot {
-                            let mut sf = Frame::new("SUBSCRIBE");
-                            sf = sf
-                                .header("id", &id)
-                                .header("destination", &dest)
-                                .header("ack", &ack);
-                            for (k, v) in headers {
-                                sf = sf.header(&k, &v);
-                            }
-                            let _ = sink.send(StompItem::Frame(sf)).await;
-                        }
-
-                        let mut hb_tick = match send_interval {
-                            Some(d) => tokio::time::interval(d),
-                            None => tokio::time::interval(Duration::from_secs(86400)),
-                        };
-                        let watchdog_half = recv_interval.map(|d| d / 2);
-
-                        backoff_secs = 1;
-
-                        'conn: loop {
-                            tokio::select! {
-                                _ = shutdown_sub.recv() => { let _ = sink.close().await; break 'conn; }
-                                maybe = out_rx.recv() => {
-                                    match maybe {
-                                        Some(item) => if sink.send(item).await.is_err() { break 'conn } else { writer_last_sent.store(current_millis(), Ordering::SeqCst); }
-                                        None => break 'conn,
-                                    }
-                                }
-                                item = stream.next() => {
-                                    match item {
-                                        Some(Ok(StompItem::Heartbeat)) => { last_received.store(current_millis(), Ordering::SeqCst); }
-                                        Some(Ok(StompItem::Frame(f))) => {
-                                            last_received.store(current_millis(), Ordering::SeqCst);
-                                            // Dispatch MESSAGE frames to any matching subscribers.
-                                            if f.command == "MESSAGE" {
-                                                // try to find destination, subscription and message-id headers
-                                                let mut dest_opt: Option<String> = None;
-                                                let mut sub_opt: Option<String> = None;
-                                                let mut msg_id_opt: Option<String> = None;
-                                                for (k, v) in &f.headers {
-                                                    let kl = k.to_lowercase();
-                                                    if kl == "destination" {
-                                                        dest_opt = Some(v.clone());
-                                                    } else if kl == "subscription" {
-                                                        sub_opt = Some(v.clone());
-                                                    } else if kl == "message-id" {
-                                                        msg_id_opt = Some(v.clone());
+                                        // Determine whether we need to track this message as pending
+                                        let mut need_pending = false;
+                                        if let Some(sub_id) = &sub_opt {
+                                            let map = subscriptions.lock().await;
+                                            for (_dest, vec) in map.iter() {
+                                                for entry in vec.iter() {
+                                                    if &entry.id == sub_id && entry.ack != "auto" {
+                                                        need_pending = true;
                                                     }
                                                 }
-
-                                                // Determine whether we need to track this message as pending
-                                                let mut need_pending = false;
-                                                if let Some(sub_id) = &sub_opt {
-                                                    let map = subscriptions.lock().await;
-                                                    for (_dest, vec) in map.iter() {
-                                                        for entry in vec.iter() {
-                                                            if &entry.id == sub_id && entry.ack != "auto" {
-                                                                need_pending = true;
-                                                            }
-                                                        }
-                                                    }
-                                                } else if let Some(dest) = &dest_opt {
-                                                    let map = subscriptions.lock().await;
-                                                    if let Some(vec) = map.get(dest) {
-                                                        for entry in vec.iter() {
-                                                            if entry.ack != "auto" {
-                                                                need_pending = true;
-                                                                break;
-                                                            }
-                                                        }
+                                            }
+                                        } else if let Some(dest) = &dest_opt {
+                                            let map = subscriptions.lock().await;
+                                            if let Some(vec) = map.get(dest) {
+                                                for entry in vec.iter() {
+                                                    if entry.ack != "auto" {
+                                                        need_pending = true;
+                                                        break;
                                                     }
                                                 }
+                                            }
+                                        }
 
-                                                // If required, add to pending map (per-subscription) before
-                                                // delivery so ACK/NACK requests from the application can
-                                                // reference the message. We require a `message-id` header
-                                                // to track messages; if missing, we cannot support ACK/NACK.
-                                                if let Some(msg_id) = msg_id_opt.clone().filter(|_| need_pending) {
-                                                    // If the server provided a subscription id in the
-                                                    // MESSAGE, store pending under that subscription.
-                                                    if let Some(sub_id) = &sub_opt {
-                                                        let mut p = pending_clone.lock().await;
+                                        // If required, add to pending map (per-subscription) before
+                                        // delivery so ACK/NACK requests from the application can
+                                        // reference the message. We require a `message-id` header
+                                        // to track messages; if missing, we cannot support ACK/NACK.
+                                        if let Some(msg_id) = msg_id_opt.clone().filter(|_| need_pending) {
+                                            // If the server provided a subscription id in the
+                                            // MESSAGE, store pending under that subscription.
+                                            if let Some(sub_id) = &sub_opt {
+                                                let mut p = pending_clone.lock().await;
+                                                let q = p
+                                                    .entry(sub_id.clone())
+                                                    .or_insert_with(VecDeque::new);
+                                                q.push_back((msg_id.clone(), f.clone()));
+                                            } else if let Some(dest) = &dest_opt {
+                                                // Destination-based delivery: add the message to
+                                                // the pending queue for each matching
+                                                // subscription on that destination.
+                                                let map = subscriptions.lock().await;
+                                                if let Some(vec) = map.get(dest) {
+                                                    let mut p = pending_clone.lock().await;
+                                                    for entry in vec.iter() {
                                                         let q = p
-                                                            .entry(sub_id.clone())
+                                                            .entry(entry.id.clone())
                                                             .or_insert_with(VecDeque::new);
                                                         q.push_back((msg_id.clone(), f.clone()));
-                                                    } else if let Some(dest) = &dest_opt {
-                                                        // Destination-based delivery: add the message to
-                                                        // the pending queue for each matching
-                                                        // subscription on that destination.
-                                                        let map = subscriptions.lock().await;
-                                                        if let Some(vec) = map.get(dest) {
-                                                            let mut p = pending_clone.lock().await;
-                                                            for entry in vec.iter() {
-                                                                let q = p
-                                                                    .entry(entry.id.clone())
-                                                                    .or_insert_with(VecDeque::new);
-                                                                q.push_back((msg_id.clone(), f.clone()));
-                                                            }
-                                                        }
                                                     }
                                                 }
-
-                                                // Deliver to subscribers.
-                                                if let Some(sub_id) = sub_opt {
-                                                    let mut map = subscriptions.lock().await;
-                                                    for (_dest, vec) in map.iter_mut() {
-                                                        vec.retain(|entry| {
-                                                            if entry.id == sub_id {
-                                                                let _ = entry.sender.try_send(f.clone());
-                                                                true
-                                                            } else {
-                                                                true
-                                                            }
-                                                        });
-                                                    }
-                                                } else if let Some(dest) = dest_opt {
-                                                    let mut map = subscriptions.lock().await;
-                                                    if let Some(vec) = map.get_mut(&dest) {
-                                                        vec.retain(|entry| entry.sender.try_send(f.clone()).is_ok());
-                                                    }
-                                                }
-                                            } else if f.command == "RECEIPT" {
-                                                // Handle RECEIPT frame: notify any waiting callers
-                                                if let Some(receipt_id) = f.get_header("receipt-id") {
-                                                    let mut receipts = pending_receipts_clone.lock().await;
-                                                    if let Some(sender) = receipts.remove(receipt_id) {
-                                                        let _ = sender.send(());
-                                                    }
-                                                }
-                                                // Don't forward RECEIPT frames to inbound channel
-                                                continue;
                                             }
+                                        }
 
-                                            let _ = in_tx.send(f).await;
+                                        // Deliver to subscribers.
+                                        if let Some(sub_id) = sub_opt {
+                                            let mut map = subscriptions.lock().await;
+                                            for (_dest, vec) in map.iter_mut() {
+                                                vec.retain(|entry| {
+                                                    if entry.id == sub_id {
+                                                        let _ = entry.sender.try_send(f.clone());
+                                                        true
+                                                    } else {
+                                                        true
+                                                    }
+                                                });
+                                            }
+                                        } else if let Some(dest) = dest_opt {
+                                            let mut map = subscriptions.lock().await;
+                                            if let Some(vec) = map.get_mut(&dest) {
+                                                vec.retain(|entry| entry.sender.try_send(f.clone()).is_ok());
+                                            }
                                         }
-                                        Some(Err(_)) | None => break 'conn,
+                                    } else if f.command == "RECEIPT" {
+                                        // Handle RECEIPT frame: notify any waiting callers
+                                        if let Some(receipt_id) = f.get_header("receipt-id") {
+                                            let mut receipts = pending_receipts_clone.lock().await;
+                                            if let Some(sender) = receipts.remove(receipt_id) {
+                                                let _ = sender.send(());
+                                            }
+                                        }
+                                        // Don't forward RECEIPT frames to inbound channel
+                                        continue;
                                     }
+
+                                    let _ = in_tx.send(f).await;
                                 }
-                                _ = hb_tick.tick() => {
-                                    if let Some(dur) = send_interval {
-                                        let last = writer_last_sent.load(Ordering::SeqCst);
-                                        if current_millis().saturating_sub(last) >= dur.as_millis() as u64 {
-                                            if sink.send(StompItem::Heartbeat).await.is_err() { break 'conn; }
-                                            writer_last_sent.store(current_millis(), Ordering::SeqCst);
-                                        }
-                                    }
-                                }
-                                _ = async { if let Some(interval) = watchdog_half { tokio::time::sleep(interval).await } else { future::pending::<()>().await } } => {
-                                    if let Some(recv_dur) = recv_interval {
-                                        let last = last_received.load(Ordering::SeqCst);
-                                        if current_millis().saturating_sub(last) > (recv_dur.as_millis() as u64 * 2) {
-                                            let _ = sink.close().await; break 'conn;
-                                        }
-                                    }
+                                Some(Err(_)) | None => break 'conn,
+                            }
+                        }
+                        _ = hb_tick.tick() => {
+                            if let Some(dur) = send_interval {
+                                let last = writer_last_sent.load(Ordering::SeqCst);
+                                if current_millis().saturating_sub(last) >= dur.as_millis() as u64 {
+                                    if sink.send(StompItem::Heartbeat).await.is_err() { break 'conn; }
+                                    writer_last_sent.store(current_millis(), Ordering::SeqCst);
                                 }
                             }
                         }
-
-                        if shutdown_sub.try_recv().is_ok() {
-                            break;
+                        _ = async { if let Some(interval) = watchdog_half { tokio::time::sleep(interval).await } else { future::pending::<()>().await } } => {
+                            if let Some(recv_dur) = recv_interval {
+                                let last = last_received.load(Ordering::SeqCst);
+                                if current_millis().saturating_sub(last) > (recv_dur.as_millis() as u64 * 2) {
+                                    let _ = sink.close().await; break 'conn;
+                                }
+                            }
                         }
-                        tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
-                        backoff_secs = (backoff_secs * 2).min(30);
-                    }
-                    Err(_) => {
-                        tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
-                        backoff_secs = (backoff_secs * 2).min(30);
                     }
                 }
+
+                if shutdown_sub.try_recv().is_ok() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+                backoff_secs = (backoff_secs * 2).min(30);
             }
         });
 
@@ -911,6 +947,82 @@ impl Connection {
             pending,
             pending_receipts,
         })
+    }
+
+    /// Build a CONNECT frame with all specified headers.
+    fn build_connect_frame(
+        accept_version: &str,
+        host: &str,
+        login: &str,
+        passcode: &str,
+        heartbeat: &str,
+        client_id: &Option<String>,
+        custom_headers: &[(String, String)],
+    ) -> Frame {
+        let mut connect = Frame::new("CONNECT")
+            .header("accept-version", accept_version)
+            .header("host", host)
+            .header("login", login)
+            .header("passcode", passcode)
+            .header("heart-beat", heartbeat);
+
+        if let Some(id) = client_id {
+            connect = connect.header("client-id", id);
+        }
+
+        // Reserved headers that custom_headers cannot override
+        let reserved = [
+            "accept-version",
+            "host",
+            "login",
+            "passcode",
+            "heart-beat",
+            "client-id",
+        ];
+
+        for (k, v) in custom_headers {
+            if !reserved.contains(&k.to_lowercase().as_str()) {
+                connect = connect.header(k, v);
+            }
+        }
+
+        connect
+    }
+
+    /// Wait for CONNECTED or ERROR response from the server.
+    ///
+    /// Returns the server's heartbeat header value on success, or an error
+    /// if the server sends an ERROR frame or closes the connection.
+    async fn await_connected_response(
+        framed: &mut Framed<TcpStream, StompCodec>,
+    ) -> Result<String, ConnError> {
+        loop {
+            match framed.next().await {
+                Some(Ok(StompItem::Frame(f))) => {
+                    if f.command == "CONNECTED" {
+                        // Extract heartbeat from server
+                        let server_hb = f.get_header("heart-beat").unwrap_or("0,0").to_string();
+                        return Ok(server_hb);
+                    } else if f.command == "ERROR" {
+                        // Server rejected connection (e.g., invalid credentials)
+                        return Err(ConnError::ServerRejected(ServerError::from_frame(f)));
+                    }
+                    // Ignore other frames during CONNECT phase
+                }
+                Some(Ok(StompItem::Heartbeat)) => {
+                    // Ignore heartbeats during handshake
+                    continue;
+                }
+                Some(Err(e)) => {
+                    return Err(ConnError::Io(e));
+                }
+                None => {
+                    return Err(ConnError::Protocol(
+                        "connection closed before CONNECTED received".to_string(),
+                    ));
+                }
+            }
+        }
     }
 
     pub async fn send_frame(&self, frame: Frame) -> Result<(), ConnError> {

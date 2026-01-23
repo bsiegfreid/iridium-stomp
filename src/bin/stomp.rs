@@ -1,7 +1,21 @@
 use clap::Parser;
+use iridium_stomp::connection::ConnError;
 use iridium_stomp::{Connection, Frame};
 use std::io::{self, BufRead, Write};
+use std::process::ExitCode;
 use tokio::sync::mpsc;
+
+/// Exit codes for different error conditions
+mod exit_codes {
+    /// Successful execution
+    pub const SUCCESS: u8 = 0;
+    /// Network/connection error (e.g., host unreachable, connection refused)
+    pub const NETWORK_ERROR: u8 = 1;
+    /// Authentication error (e.g., invalid credentials)
+    pub const AUTH_ERROR: u8 = 2;
+    /// Protocol error (e.g., unexpected server response)
+    pub const PROTOCOL_ERROR: u8 = 3;
+}
 
 #[derive(Parser)]
 #[command(name = "stomp")]
@@ -28,19 +42,76 @@ struct Cli {
     subscribe: Vec<String>,
 }
 
+/// Format a connection error with user-friendly messaging
+fn format_connection_error(err: &ConnError, address: &str) -> (String, u8) {
+    match err {
+        ConnError::Io(io_err) => {
+            let message = match io_err.kind() {
+                std::io::ErrorKind::ConnectionRefused => {
+                    format!("Connection refused: {}", address)
+                }
+                std::io::ErrorKind::TimedOut => {
+                    format!("Connection timed out: {}", address)
+                }
+                _ => {
+                    format!("Connection failed: {}", io_err)
+                }
+            };
+            (message, exit_codes::NETWORK_ERROR)
+        }
+        ConnError::ServerRejected(server_err) => {
+            let mut message = format!("Authentication failed: {}", server_err.message);
+            if let Some(body) = &server_err.body {
+                message.push_str(&format!(" ({})", body));
+            }
+            (message, exit_codes::AUTH_ERROR)
+        }
+        ConnError::Protocol(msg) => (
+            format!("Protocol error: {}", msg),
+            exit_codes::PROTOCOL_ERROR,
+        ),
+        ConnError::ReceiptTimeout(id) => (
+            format!("Receipt timeout: {}", id),
+            exit_codes::PROTOCOL_ERROR,
+        ),
+    }
+}
+
+/// Print an error message to stderr
+fn print_error(message: &str) {
+    eprintln!("{}", message);
+}
+
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> ExitCode {
     let cli = Cli::parse();
 
     println!("Connecting to {}...", cli.address);
-    let conn = Connection::connect(&cli.address, &cli.login, &cli.passcode, &cli.heartbeat).await?;
+
+    let conn =
+        match Connection::connect(&cli.address, &cli.login, &cli.passcode, &cli.heartbeat).await {
+            Ok(conn) => conn,
+            Err(err) => {
+                let (message, exit_code) = format_connection_error(&err, &cli.address);
+                print_error(&message);
+                return ExitCode::from(exit_code);
+            }
+        };
+
     println!("Connected.");
 
     // Subscribe to requested destinations
     for dest in &cli.subscribe {
-        let sub = conn
+        let sub = match conn
             .subscribe(dest, iridium_stomp::connection::AckMode::Auto)
-            .await?;
+            .await
+        {
+            Ok(sub) => sub,
+            Err(err) => {
+                print_error(&format!("Failed to subscribe to '{}': {}", dest, err));
+                return ExitCode::from(exit_codes::PROTOCOL_ERROR);
+            }
+        };
         println!("Subscribed to: {}", dest);
 
         // Spawn a task to print incoming messages for this subscription
@@ -92,7 +163,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         print!("> ");
-        io::stdout().flush()?;
+        let _ = io::stdout().flush();
 
         let line = match cmd_rx.recv().await {
             Some(l) => l,
@@ -174,5 +245,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    Ok(())
+    ExitCode::from(exit_codes::SUCCESS)
 }

@@ -226,9 +226,35 @@ conn.send_frame_with_receipt(msg).await?;
 conn.wait_for_receipt("msg-456", Duration::from_secs(5)).await?;
 ```
 
-### Error Handling
+### Connection Error Handling
 
-Server errors are surfaced as first-class types for type-safe handling:
+Connection failures (invalid credentials, server unreachable) are reported immediately:
+
+```rust,ignore
+use iridium_stomp::Connection;
+use iridium_stomp::connection::ConnError;
+
+match Connection::connect("localhost:61613", "user", "pass", Connection::DEFAULT_HEARTBEAT).await {
+    Ok(conn) => {
+        // Connected successfully
+    }
+    Err(ConnError::ServerRejected(err)) => {
+        // Authentication failed or server rejected connection
+        eprintln!("Server rejected: {}", err.message);
+    }
+    Err(ConnError::Io(err)) => {
+        // Network error (connection refused, timeout, etc.)
+        eprintln!("Network error: {}", err);
+    }
+    Err(err) => {
+        eprintln!("Connection failed: {}", err);
+    }
+}
+```
+
+### Server Error Handling
+
+Errors received after connection are surfaced as `ReceivedFrame::Error`:
 
 ```rust,ignore
 use iridium_stomp::{Connection, ReceivedFrame};
