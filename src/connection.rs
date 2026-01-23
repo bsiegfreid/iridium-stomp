@@ -708,7 +708,7 @@ impl Connection {
                                 continue;
                             }
 
-                            // Wait for CONNECTED (on reconnect, we log but don't fail on ERROR)
+                            // Wait for CONNECTED (on reconnect, silently retry on ERROR)
                             match Self::await_connected_response(&mut framed).await {
                                 Ok(server_hb) => {
                                     let (cx, cy) = parse_heartbeat_header(&client_hb);
@@ -1014,7 +1014,7 @@ impl Connection {
                     continue;
                 }
                 Some(Err(e)) => {
-                    return Err(ConnError::Io(std::io::Error::other(e.to_string())));
+                    return Err(ConnError::Io(e));
                 }
                 None => {
                     return Err(ConnError::Protocol(
