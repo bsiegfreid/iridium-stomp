@@ -1039,10 +1039,8 @@ impl Connection {
 
     /// Generate a unique receipt ID.
     fn generate_receipt_id() -> String {
-        use std::sync::atomic::AtomicU64;
-        use std::sync::atomic::Ordering::SeqCst;
         static RECEIPT_COUNTER: AtomicU64 = AtomicU64::new(1);
-        format!("rcpt-{}", RECEIPT_COUNTER.fetch_add(1, SeqCst))
+        format!("rcpt-{}", RECEIPT_COUNTER.fetch_add(1, Ordering::SeqCst))
     }
 
     /// Send a frame with a receipt request and return the receipt ID.
