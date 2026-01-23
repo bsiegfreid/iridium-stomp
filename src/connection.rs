@@ -1037,6 +1037,12 @@ impl Connection {
             .map_err(|_| ConnError::Protocol("send channel closed".into()))
     }
 
+    /// Generate a unique receipt ID.
+    fn generate_receipt_id() -> String {
+        static RECEIPT_COUNTER: AtomicU64 = AtomicU64::new(1);
+        format!("rcpt-{}", RECEIPT_COUNTER.fetch_add(1, Ordering::SeqCst))
+    }
+
     /// Send a frame with a receipt request and return the receipt ID.
     ///
     /// This method adds a unique `receipt` header to the frame and registers
@@ -1055,12 +1061,7 @@ impl Connection {
     /// conn.wait_for_receipt(&receipt_id, Duration::from_secs(5)).await?;
     /// ```
     pub async fn send_frame_with_receipt(&self, frame: Frame) -> Result<String, ConnError> {
-        use std::sync::atomic::AtomicU64;
-        use std::sync::atomic::Ordering::SeqCst;
-
-        // Generate a unique receipt ID using a static counter
-        static RECEIPT_COUNTER: AtomicU64 = AtomicU64::new(1);
-        let receipt_id = format!("rcpt-{}", RECEIPT_COUNTER.fetch_add(1, SeqCst));
+        let receipt_id = Self::generate_receipt_id();
 
         // Create the oneshot channel for notification
         let (tx, _rx) = oneshot::channel();
@@ -1160,12 +1161,7 @@ impl Connection {
         frame: Frame,
         timeout: Duration,
     ) -> Result<(), ConnError> {
-        // Generate receipt ID and register before sending
-        use std::sync::atomic::AtomicU64;
-        use std::sync::atomic::Ordering::SeqCst;
-
-        static RECEIPT_COUNTER: AtomicU64 = AtomicU64::new(1);
-        let receipt_id = format!("rcpt-{}", RECEIPT_COUNTER.fetch_add(1, SeqCst));
+        let receipt_id = Self::generate_receipt_id();
 
         // Create the oneshot channel for notification
         let (tx, rx) = oneshot::channel();
