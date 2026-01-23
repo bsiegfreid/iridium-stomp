@@ -84,3 +84,82 @@ fn conn_error_is_error_trait() {
     fn assert_error<E: std::error::Error>() {}
     assert_error::<ConnError>();
 }
+
+#[test]
+fn conn_error_receipt_timeout_display() {
+    let conn_err = ConnError::ReceiptTimeout("msg-123".to_string());
+    let display = format!("{}", conn_err);
+    assert!(display.contains("receipt timeout"));
+    assert!(display.contains("msg-123"));
+}
+
+// =============================================================================
+// ConnError::ServerRejected Tests
+// =============================================================================
+
+#[test]
+fn conn_error_server_rejected_display() {
+    use iridium_stomp::{Frame, ServerError};
+
+    let frame = Frame::new("ERROR")
+        .header("message", "authentication failed")
+        .set_body(b"Invalid credentials".to_vec());
+    let server_err = ServerError::from_frame(frame);
+    let conn_err = ConnError::ServerRejected(server_err);
+
+    let display = format!("{}", conn_err);
+    assert!(display.contains("server rejected"));
+    assert!(display.contains("authentication failed"));
+}
+
+#[test]
+fn conn_error_server_rejected_debug() {
+    use iridium_stomp::{Frame, ServerError};
+
+    let frame = Frame::new("ERROR").header("message", "access denied");
+    let server_err = ServerError::from_frame(frame);
+    let conn_err = ConnError::ServerRejected(server_err);
+
+    let debug = format!("{:?}", conn_err);
+    assert!(debug.contains("ServerRejected"));
+    assert!(debug.contains("access denied"));
+}
+
+#[test]
+fn conn_error_server_rejected_extract_error() {
+    use iridium_stomp::{Frame, ServerError};
+
+    let frame = Frame::new("ERROR")
+        .header("message", "not authorized")
+        .set_body(b"You do not have permission".to_vec());
+    let server_err = ServerError::from_frame(frame);
+    let conn_err = ConnError::ServerRejected(server_err);
+
+    // Extract the inner ServerError via pattern matching
+    match conn_err {
+        ConnError::ServerRejected(e) => {
+            assert_eq!(e.message, "not authorized");
+            assert_eq!(e.body, Some("You do not have permission".to_string()));
+        }
+        _ => panic!("expected ServerRejected variant"),
+    }
+}
+
+#[test]
+fn conn_error_server_rejected_preserves_frame() {
+    use iridium_stomp::{Frame, ServerError};
+
+    let frame = Frame::new("ERROR")
+        .header("message", "error")
+        .header("custom-header", "custom-value");
+    let server_err = ServerError::from_frame(frame);
+    let conn_err = ConnError::ServerRejected(server_err);
+
+    // Verify we can access the original frame through the error
+    match conn_err {
+        ConnError::ServerRejected(e) => {
+            assert_eq!(e.frame.get_header("custom-header"), Some("custom-value"));
+        }
+        _ => panic!("expected ServerRejected variant"),
+    }
+}

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-01-22
+
+### Fixed
+
+- Connection errors (invalid credentials, server rejections) are now reported immediately
+  - Previously, ERROR frames during CONNECT were silently ignored
+  - `connect()` now returns `ConnError::ServerRejected` on authentication failure
+  - Initial STOMP handshake completes before `connect()` returns
+
+### Added
+
+- `ConnError::ServerRejected(ServerError)` variant for connection-time errors
+
+### Changed
+
+- CLI now reports connection errors with clear messages and distinct exit codes
+  - Exit 1: Network errors (connection refused, timeout)
+  - Exit 2: Authentication errors (invalid credentials)
+  - Exit 3: Protocol errors
+
 ## [0.2.0] - 2026-01-16
 
 ### Fixed
@@ -62,7 +82,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Feature-gated CLI (`--features cli`)
 - Comprehensive test suite (150+ tests)
 
-[Unreleased]: https://github.com/bsiegfreid/iridium-stomp/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/bsiegfreid/iridium-stomp/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/bsiegfreid/iridium-stomp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/bsiegfreid/iridium-stomp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/bsiegfreid/iridium-stomp/releases/tag/v0.1.0
 [#32]: https://github.com/bsiegfreid/iridium-stomp/issues/32
