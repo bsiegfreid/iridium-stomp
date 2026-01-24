@@ -189,10 +189,19 @@ async fn run_app(
                         let max_scroll = state.messages.len().saturating_sub(1);
                         state.scroll_offset = (state.scroll_offset + 10).min(max_scroll);
                     }
+                    KeyCode::Up if key.modifiers.is_empty() => {
+                        let mut state = app.state.lock().await;
+                        state.history_prev();
+                    }
+                    KeyCode::Down if key.modifiers.is_empty() => {
+                        let mut state = app.state.lock().await;
+                        state.history_next();
+                    }
                     KeyCode::Enter => {
                         let input = {
                             let mut state = app.state.lock().await;
                             let input = state.input.clone();
+                            state.add_to_history(&input);
                             state.input.clear();
                             state.cursor_pos = 0;
                             input

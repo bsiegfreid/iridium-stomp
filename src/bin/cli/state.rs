@@ -55,6 +55,13 @@ pub struct AppState {
     pub input: String,
     /// Cursor position in input
     pub cursor_pos: usize,
+
+    /// Command history
+    pub command_history: Vec<String>,
+    /// Current position in history (None = not browsing)
+    pub history_index: Option<usize>,
+    /// Saved input when browsing history
+    pub saved_input: String,
 }
 
 impl AppState {
@@ -73,6 +80,9 @@ impl AppState {
             scroll_offset: 0,
             input: String::new(),
             cursor_pos: 0,
+            command_history: Vec::new(),
+            history_index: None,
+            saved_input: String::new(),
         }
     }
 
@@ -152,6 +162,62 @@ impl AppState {
     pub fn clear_messages(&mut self) {
         self.messages.clear();
         self.scroll_offset = 0;
+    }
+
+    /// Add a command to history
+    pub fn add_to_history(&mut self, cmd: &str) {
+        let cmd = cmd.trim();
+        if !cmd.is_empty() {
+            // Don't add duplicates of the last command
+            if self.command_history.last().map(|s| s.as_str()) != Some(cmd) {
+                self.command_history.push(cmd.to_string());
+            }
+        }
+        self.history_index = None;
+        self.saved_input.clear();
+    }
+
+    /// Navigate to previous command in history
+    pub fn history_prev(&mut self) {
+        if self.command_history.is_empty() {
+            return;
+        }
+
+        match self.history_index {
+            None => {
+                // Starting to browse - save current input
+                self.saved_input = self.input.clone();
+                self.history_index = Some(self.command_history.len() - 1);
+            }
+            Some(idx) if idx > 0 => {
+                self.history_index = Some(idx - 1);
+            }
+            _ => return, // Already at oldest
+        }
+
+        if let Some(idx) = self.history_index {
+            self.input = self.command_history[idx].clone();
+            self.cursor_pos = self.input.len();
+        }
+    }
+
+    /// Navigate to next command in history
+    pub fn history_next(&mut self) {
+        match self.history_index {
+            None => {} // Not browsing history
+            Some(idx) => {
+                if idx + 1 < self.command_history.len() {
+                    self.history_index = Some(idx + 1);
+                    self.input = self.command_history[idx + 1].clone();
+                    self.cursor_pos = self.input.len();
+                } else {
+                    // Return to saved input
+                    self.history_index = None;
+                    self.input = self.saved_input.clone();
+                    self.cursor_pos = self.input.len();
+                }
+            }
+        }
     }
 
     /// Generate session summary text
