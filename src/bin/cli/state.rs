@@ -156,6 +156,11 @@ impl AppState {
 
     /// Generate session summary text
     pub fn generate_summary(&self) -> String {
+        self.generate_summary_with_options(false, 80)
+    }
+
+    /// Generate session report with optional message history
+    pub fn generate_summary_with_options(&self, include_messages: bool, max_width: usize) -> String {
         let end_time = Local::now();
         let duration = end_time.signed_duration_since(self.start_time);
         let total_secs = duration.num_seconds();
@@ -163,30 +168,60 @@ impl AppState {
         let secs = total_secs % 60;
 
         let mut lines = Vec::new();
-        lines.push("═══════════════════════════════════════════════════".to_string());
-        lines.push("  iridium-stomp Session Summary".to_string());
-        lines.push("═══════════════════════════════════════════════════".to_string());
+        lines.push("═══════════════════════════════════════════════════════════════════════════════".to_string());
+        lines.push("  iridium-stomp Session Report".to_string());
+        lines.push("═══════════════════════════════════════════════════════════════════════════════".to_string());
+        lines.push(format!("  Host:       {}", self.host));
+        lines.push(format!("  User:       {}", self.user));
         lines.push(format!("  Started:    {}", self.start_time.format("%Y-%m-%d %H:%M:%S")));
         lines.push(format!("  Ended:      {}", end_time.format("%Y-%m-%d %H:%M:%S")));
         lines.push(format!("  Duration:   {}m {}s", mins, secs));
         lines.push(String::new());
-        lines.push("  Messages Received:".to_string());
+        lines.push("  Subscriptions:".to_string());
 
         // Sort destinations by message count (descending)
         let mut subs: Vec<_> = self.subscriptions.iter().collect();
         subs.sort_by(|a, b| b.1.message_count.cmp(&a.1.message_count));
 
-        let max_dest_len = subs.iter().map(|(d, _)| d.len()).max().unwrap_or(20);
+        let max_dest_len = subs.iter().map(|(d, _)| d.len()).max().unwrap_or(20).min(40);
         for (dest, stats) in &subs {
-            lines.push(format!("    {:width$} {:>6}", dest, stats.message_count, width = max_dest_len));
+            let dest_display = truncate_str(dest, max_dest_len);
+            lines.push(format!("    {:width$} {:>6}", dest_display, stats.message_count, width = max_dest_len));
         }
         lines.push(format!("    {:─>width$}", "", width = max_dest_len + 7));
         lines.push(format!("    {:width$} {:>6}", "Total", self.total_message_count(), width = max_dest_len));
         lines.push(String::new());
         lines.push(format!("  Heartbeats received: {}", self.heartbeat_count));
-        lines.push("═══════════════════════════════════════════════════".to_string());
+
+        if include_messages && !self.messages.is_empty() {
+            lines.push(String::new());
+            lines.push("───────────────────────────────────────────────────────────────────────────────".to_string());
+            lines.push("  Message History".to_string());
+            lines.push("───────────────────────────────────────────────────────────────────────────────".to_string());
+
+            for msg in &self.messages {
+                let time = msg.timestamp.format("%H:%M:%S").to_string();
+                let prefix = format!("  {} [{}] ", time, msg.destination);
+                let body_width = max_width.saturating_sub(prefix.len());
+                let body = truncate_str(&msg.body, body_width);
+                lines.push(format!("{}{}", prefix, body));
+            }
+        }
+
+        lines.push("═══════════════════════════════════════════════════════════════════════════════".to_string());
 
         lines.join("\n")
+    }
+}
+
+/// Truncate a string to max_len characters, adding "..." if truncated
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else if max_len <= 3 {
+        ".".repeat(max_len)
+    } else {
+        format!("{}...", &s[..max_len - 3])
     }
 }
 

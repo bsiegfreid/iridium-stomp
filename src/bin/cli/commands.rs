@@ -85,6 +85,29 @@ pub async fn execute_command(
             CommandResult::Ok
         }
 
+        "report" => {
+            let state = state.lock().await;
+            if parts.len() >= 2 {
+                // Write to file
+                let filename = parts[1];
+                match std::fs::File::create(filename) {
+                    Ok(mut file) => {
+                        if let Err(e) = writeln!(file, "{}", state.generate_summary_with_options(true, 80)) {
+                            return CommandResult::Error(format!("Failed to write report: {}", e));
+                        }
+                        println!("Report written to {}", filename);
+                    }
+                    Err(e) => {
+                        return CommandResult::Error(format!("Failed to create file: {}", e));
+                    }
+                }
+            } else {
+                // Print to stdout
+                println!("{}", state.generate_summary_with_options(true, 80));
+            }
+            CommandResult::Ok
+        }
+
         "clear" => {
             let mut state = state.lock().await;
             state.clear_messages();
@@ -107,6 +130,7 @@ pub fn print_help() {
     println!("  sub <destination>             - Subscribe to a destination");
     println!("  about                         - Show copyright and license");
     println!("  summary [file]                - Print session summary (or save to file)");
+    println!("  report [file]                 - Full report with message history (or save to file)");
     println!("  clear                         - Clear message history");
     println!("  quit                          - Exit");
 }
