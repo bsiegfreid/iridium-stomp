@@ -163,22 +163,31 @@ async fn run_app(
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         app.should_quit = true;
                     }
-                    KeyCode::Char('h') if key.modifiers.is_empty() && !is_input_focused(&app).await => {
+                    KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         let mut state = app.state.lock().await;
                         state.toggle_headers();
                     }
-                    KeyCode::Up if !is_input_focused(&app).await => {
+                    KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         let mut state = app.state.lock().await;
                         if state.scroll_offset > 0 {
                             state.scroll_offset -= 1;
                         }
                     }
-                    KeyCode::Down if !is_input_focused(&app).await => {
+                    KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         let mut state = app.state.lock().await;
                         let max_scroll = state.messages.len().saturating_sub(1);
                         if state.scroll_offset < max_scroll {
                             state.scroll_offset += 1;
                         }
+                    }
+                    KeyCode::PageUp => {
+                        let mut state = app.state.lock().await;
+                        state.scroll_offset = state.scroll_offset.saturating_sub(10);
+                    }
+                    KeyCode::PageDown => {
+                        let mut state = app.state.lock().await;
+                        let max_scroll = state.messages.len().saturating_sub(1);
+                        state.scroll_offset = (state.scroll_offset + 10).min(max_scroll);
                     }
                     KeyCode::Enter => {
                         let input = {
@@ -258,12 +267,6 @@ async fn run_app(
     }
 
     Ok(())
-}
-
-async fn is_input_focused(_app: &App) -> bool {
-    // For simplicity, input is always focused in this implementation
-    // In a more complex TUI, we'd track focus state
-    false
 }
 
 fn ui(f: &mut ratatui::Frame, state: &super::state::AppState) {
@@ -346,7 +349,7 @@ fn render_subscriptions(f: &mut ratatui::Frame, area: Rect, state: &super::state
 }
 
 fn render_messages(f: &mut ratatui::Frame, area: Rect, state: &super::state::AppState) {
-    let header_hint = if state.show_headers { "[h] hide headers" } else { "[h] show headers" };
+    let header_hint = if state.show_headers { "[^H] hide headers" } else { "[^H] show headers" };
 
     let block = Block::default()
         .borders(Borders::ALL)
