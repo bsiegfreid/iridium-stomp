@@ -20,6 +20,7 @@ pub async fn execute_command(
     conn: &Connection,
     state: SharedState,
     sub_tx: &mpsc::Sender<String>,
+    tui_mode: bool,
 ) -> CommandResult {
     let parts: Vec<&str> = line.trim().splitn(3, ' ').collect();
     if parts.is_empty() || parts[0].is_empty() {
@@ -58,19 +59,28 @@ pub async fn execute_command(
         }
 
         "about" => {
+            if tui_mode {
+                return CommandResult::Error(format!(
+                    "iridium-stomp v{} - MIT License - github.com/bsiegfreid/iridium-stomp",
+                    env!("CARGO_PKG_VERSION")
+                ));
+            }
             print_about();
             CommandResult::Ok
         }
 
         "summary" => {
-            let state = state.lock().await;
             if parts.len() >= 2 {
                 // Write to file
                 let filename = parts[1];
+                let state = state.lock().await;
                 match std::fs::File::create(filename) {
                     Ok(mut file) => {
                         if let Err(e) = writeln!(file, "{}", state.generate_summary()) {
                             return CommandResult::Error(format!("Failed to write summary: {}", e));
+                        }
+                        if tui_mode {
+                            return CommandResult::Error(format!("Summary written to {}", filename));
                         }
                         println!("Summary written to {}", filename);
                     }
@@ -78,22 +88,28 @@ pub async fn execute_command(
                         return CommandResult::Error(format!("Failed to create file: {}", e));
                     }
                 }
+            } else if tui_mode {
+                return CommandResult::Error("Usage: summary <filename>".to_string());
             } else {
                 // Print to stdout
+                let state = state.lock().await;
                 println!("{}", state.generate_summary());
             }
             CommandResult::Ok
         }
 
         "report" => {
-            let state = state.lock().await;
             if parts.len() >= 2 {
                 // Write to file
                 let filename = parts[1];
+                let state = state.lock().await;
                 match std::fs::File::create(filename) {
                     Ok(mut file) => {
                         if let Err(e) = writeln!(file, "{}", state.generate_summary_with_options(true, 80)) {
                             return CommandResult::Error(format!("Failed to write report: {}", e));
+                        }
+                        if tui_mode {
+                            return CommandResult::Error(format!("Report written to {}", filename));
                         }
                         println!("Report written to {}", filename);
                     }
@@ -101,8 +117,11 @@ pub async fn execute_command(
                         return CommandResult::Error(format!("Failed to create file: {}", e));
                     }
                 }
+            } else if tui_mode {
+                return CommandResult::Error("Usage: report <filename>".to_string());
             } else {
                 // Print to stdout
+                let state = state.lock().await;
                 println!("{}", state.generate_summary_with_options(true, 80));
             }
             CommandResult::Ok
@@ -115,6 +134,11 @@ pub async fn execute_command(
         }
 
         "help" | "?" => {
+            if tui_mode {
+                return CommandResult::Error(
+                    "Commands: send, sub, summary <file>, report <file>, clear, quit".to_string()
+                );
+            }
             print_help();
             CommandResult::Ok
         }

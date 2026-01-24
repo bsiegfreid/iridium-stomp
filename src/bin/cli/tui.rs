@@ -207,7 +207,7 @@ async fn run_app(
                             input
                         };
                         if !input.is_empty() {
-                            match execute_command(&input, &app.conn, app.state.clone(), sub_tx).await {
+                            match execute_command(&input, &app.conn, app.state.clone(), sub_tx, true).await {
                                 CommandResult::Ok => {}
                                 CommandResult::Quit => {
                                     app.should_quit = true;

@@ -102,7 +102,7 @@ pub async fn run(cli: &Cli) -> Result<(), (String, u8)> {
             None => break,
         };
 
-        match execute_command(&line, &conn, state.clone(), &sub_tx).await {
+        match execute_command(&line, &conn, state.clone(), &sub_tx, false).await {
             CommandResult::Ok => {}
             CommandResult::Quit => {
                 println!("Disconnecting...");
