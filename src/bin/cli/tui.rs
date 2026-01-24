@@ -1,5 +1,5 @@
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
+    event::{self, Event, KeyCode, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -90,10 +90,39 @@ pub async fn run(cli: &Cli) -> Result<(), (String, u8)> {
     let state_sub = state.clone();
     tokio::spawn(async move {
         while let Some(dest) = sub_rx.recv().await {
-            if let Err((msg, _)) = subscribe_destination(&conn_sub, &dest, state_sub.clone()).await {
-                // In TUI mode, we can't easily print errors, so just log to state
-                let mut s = state_sub.lock().await;
-                s.record_message("ERROR", msg, vec![]);
+            match subscribe_destination(&conn_sub, &dest, state_sub.clone()).await {
+                Ok(()) => {
+                    let mut s = state_sub.lock().await;
+                    s.record_message("INFO", format!("Subscribed to {}", dest), vec![]);
+                }
+                Err((msg, _)) => {
+                    let mut s = state_sub.lock().await;
+                    s.record_message("ERROR", msg, vec![]);
+                }
+            }
+        }
+    });
+
+    // Spawn task to monitor for ERROR frames from the broker
+    let conn_err = conn.clone();
+    let state_err = state.clone();
+    tokio::spawn(async move {
+        loop {
+            match conn_err.next_frame().await {
+                Some(iridium_stomp::ReceivedFrame::Error(err)) => {
+                    let mut s = state_err.lock().await;
+                    let msg = if let Some(ref body) = err.body {
+                        format!("{}: {}", err.message, body)
+                    } else {
+                        err.message.clone()
+                    };
+                    // Include error frame headers for context when user toggles header display
+                    s.record_message("BROKER ERROR", msg, err.frame.headers.clone());
+                }
+                Some(iridium_stomp::ReceivedFrame::Frame(_)) => {
+                    // Other frames are handled by subscription receivers
+                }
+                None => break, // Connection closed
             }
         }
     });
@@ -101,7 +130,7 @@ pub async fn run(cli: &Cli) -> Result<(), (String, u8)> {
     // Setup terminal
     enable_raw_mode().map_err(|e| (format!("Failed to enable raw mode: {}", e), 1))?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
+    execute!(stdout, EnterAlternateScreen)
         .map_err(|e| (format!("Failed to setup terminal: {}", e), 1))?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)
@@ -117,8 +146,7 @@ pub async fn run(cli: &Cli) -> Result<(), (String, u8)> {
     disable_raw_mode().ok();
     execute!(
         terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
+        LeaveAlternateScreen
     ).ok();
     terminal.show_cursor().ok();
 
@@ -212,6 +240,10 @@ async fn run_app(
                                 CommandResult::Quit => {
                                     app.should_quit = true;
                                 }
+                                CommandResult::Info(msg) => {
+                                    let mut state = app.state.lock().await;
+                                    state.record_message("INFO", msg, vec![]);
+                                }
                                 CommandResult::Error(msg) => {
                                     let mut state = app.state.lock().await;
                                     state.record_message("ERROR", msg, vec![]);
@@ -295,8 +327,8 @@ fn ui(f: &mut ratatui::Frame, state: &super::state::AppState) {
     // Header bar
     render_header(f, chunks[0], state);
 
-    // Subscriptions panel
-    render_subscriptions(f, chunks[1], state);
+    // Activity counts panel
+    render_counts(f, chunks[1], state);
 
     // Messages panel
     render_messages(f, chunks[2], state);
@@ -333,29 +365,46 @@ fn render_header(f: &mut ratatui::Frame, area: Rect, state: &super::state::AppSt
     f.render_widget(header, area);
 }
 
-fn render_subscriptions(f: &mut ratatui::Frame, area: Rect, state: &super::state::AppState) {
-    // Sort subscriptions by destination name
+fn render_counts(f: &mut ratatui::Frame, area: Rect, state: &super::state::AppState) {
+    let mut rows: Vec<Row> = Vec::new();
+
+    // Add subscription counts (sorted by destination)
     let mut sorted_subs: Vec<_> = state.subscriptions.iter().collect();
     sorted_subs.sort_by(|a, b| a.0.cmp(b.0));
+    for (dest, stats) in sorted_subs {
+        rows.push(Row::new(vec![dest.clone(), stats.message_count.to_string()])
+            .style(Style::default().fg(Color::Green)));
+    }
 
-    let mut rows: Vec<Row> = sorted_subs.iter()
-        .map(|(dest, stats)| {
-            Row::new(vec![
-                (*dest).clone(),
-                stats.message_count.to_string(),
-            ])
-        })
-        .collect();
+    // Add other counts if non-zero
+    if state.sent_count > 0 {
+        rows.push(Row::new(vec!["Sent".to_string(), state.sent_count.to_string()])
+            .style(Style::default().fg(Color::Blue)));
+    }
+    if state.info_count > 0 {
+        rows.push(Row::new(vec!["Info".to_string(), state.info_count.to_string()])
+            .style(Style::default().fg(Color::Cyan)));
+    }
+    if state.warning_count > 0 {
+        rows.push(Row::new(vec!["Warnings".to_string(), state.warning_count.to_string()])
+            .style(Style::default().fg(Color::Yellow)));
+    }
+    if state.error_count > 0 {
+        rows.push(Row::new(vec!["Errors".to_string(), state.error_count.to_string()])
+            .style(Style::default().fg(Color::Red)));
+    }
 
     // Add total row
-    let total = state.total_message_count();
-    rows.push(Row::new(vec!["".to_string(), "─────────".to_string()]));
-    rows.push(Row::new(vec!["Total".to_string(), total.to_string()])
-        .style(Style::default().add_modifier(Modifier::BOLD)));
+    let total = state.total_message_count() + state.sent_count + state.info_count + state.warning_count + state.error_count;
+    if !rows.is_empty() {
+        rows.push(Row::new(vec!["".to_string(), "─────────".to_string()]));
+        rows.push(Row::new(vec!["Total".to_string(), total.to_string()])
+            .style(Style::default().add_modifier(Modifier::BOLD)));
+    }
 
     let widths = [Constraint::Percentage(80), Constraint::Percentage(20)];
     let table = Table::new(rows, widths)
-        .header(Row::new(vec!["Subscriptions", "Count"])
+        .header(Row::new(vec!["Activity", "Count"])
             .style(Style::default().add_modifier(Modifier::BOLD))
             .bottom_margin(1))
         .block(Block::default().borders(Borders::ALL));
@@ -395,6 +444,36 @@ fn render_messages(f: &mut ratatui::Frame, area: Rect, state: &super::state::App
         }
 
         let time = msg.timestamp.format("%H:%M:%S").to_string();
+
+        // Color and style based on message type
+        let (dest_style, body_style, max_body_len) = match msg.destination.as_str() {
+            "ERROR" | "BROKER ERROR" => (
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Red),
+                200, // Show more of error messages
+            ),
+            "WARN" => (
+                Style::default().fg(Color::Yellow),
+                Style::default().fg(Color::Yellow),
+                120,
+            ),
+            "INFO" => (
+                Style::default().fg(Color::Cyan),
+                Style::default().fg(Color::DarkGray),
+                80,
+            ),
+            "SENT" => (
+                Style::default().fg(Color::Blue),
+                Style::default(),
+                60,
+            ),
+            _ => (
+                Style::default().fg(Color::Cyan),
+                Style::default(),
+                60,
+            ),
+        };
+
         let dest_display = if msg.destination.len() > 20 {
             format!("...{}", &msg.destination[msg.destination.len()-17..])
         } else {
@@ -402,8 +481,8 @@ fn render_messages(f: &mut ratatui::Frame, area: Rect, state: &super::state::App
         };
 
         // Truncate body for display
-        let body_display = if msg.body.len() > 60 {
-            format!("{}...", &msg.body[..57])
+        let body_display = if msg.body.len() > max_body_len {
+            format!("{}...", &msg.body[..max_body_len - 3])
         } else {
             msg.body.clone()
         };
@@ -411,9 +490,9 @@ fn render_messages(f: &mut ratatui::Frame, area: Rect, state: &super::state::App
         lines.push(Line::from(vec![
             Span::styled(time, Style::default().fg(Color::DarkGray)),
             Span::raw(" ["),
-            Span::styled(dest_display, Style::default().fg(Color::Cyan)),
+            Span::styled(dest_display, dest_style),
             Span::raw("] "),
-            Span::raw(body_display),
+            Span::styled(body_display, body_style),
         ]));
 
         // Show headers if toggled

@@ -10,6 +10,8 @@ pub enum CommandResult {
     Ok,
     /// Command requests exit
     Quit,
+    /// Informational message (not an error)
+    Info(String),
     /// Error executing command
     Error(String),
 }
@@ -36,12 +38,54 @@ pub async fn execute_command(
             }
             let dest = parts[1];
             let msg = parts[2];
+
+            // Validate destination format
+            if !dest.starts_with('/') {
+                return CommandResult::Error(format!(
+                    "Invalid destination '{}'. Must start with / (e.g., /topic/test, /queue/test)",
+                    dest
+                ));
+            }
+
+            // Check if destination is known (subscribed) or matches common patterns
+            let is_known = {
+                let state = state.lock().await;
+                state.subscriptions.contains_key(dest)
+            };
+            let is_common_pattern = dest.starts_with("/topic/")
+                || dest.starts_with("/queue/")
+                || dest.starts_with("/amq/")
+                || dest.starts_with("/exchange/");
+
+            let warning = if !is_known && !is_common_pattern {
+                Some(format!(
+                    "Warning: '{}' doesn't match common patterns (/topic/, /queue/, /amq/, /exchange/)",
+                    dest
+                ))
+            } else {
+                None
+            };
+
             let frame = Frame::new("SEND")
                 .header("destination", dest)
                 .header("content-type", "text/plain")
                 .set_body(msg.as_bytes().to_vec());
             match conn.send_frame(frame).await {
-                Ok(_) => CommandResult::Ok,
+                Ok(_) => {
+                    if tui_mode {
+                        let mut state = state.lock().await;
+                        if let Some(warn) = warning {
+                            state.record_message("WARN", warn, vec![]);
+                        }
+                        state.record_message("SENT", format!("[{}] {}", dest, msg), vec![]);
+                    } else {
+                        if let Some(warn) = warning {
+                            eprintln!("{}", warn);
+                        }
+                        println!("Sent to {}", dest);
+                    }
+                    CommandResult::Ok
+                }
                 Err(e) => CommandResult::Error(format!("Send error: {}", e)),
             }
         }
@@ -50,18 +94,48 @@ pub async fn execute_command(
             if parts.len() < 2 {
                 return CommandResult::Error("Usage: sub <destination>".to_string());
             }
-            let dest = parts[1].to_string();
+            let dest = parts[1];
+
+            // Validate destination format
+            if !dest.starts_with('/') {
+                return CommandResult::Error(format!(
+                    "Invalid destination '{}'. Must start with / (e.g., /topic/test, /queue/test)",
+                    dest
+                ));
+            }
+
+            // Warn for unusual patterns
+            let is_common_pattern = dest.starts_with("/topic/")
+                || dest.starts_with("/queue/")
+                || dest.starts_with("/amq/")
+                || dest.starts_with("/exchange/");
+
+            if !is_common_pattern {
+                let warn = format!(
+                    "Warning: '{}' doesn't match common patterns (/topic/, /queue/, /amq/, /exchange/)",
+                    dest
+                );
+                if tui_mode {
+                    let mut state = state.lock().await;
+                    state.record_message("WARN", warn, vec![]);
+                } else {
+                    eprintln!("{}", warn);
+                }
+            }
+
             // Send subscription request to the subscription manager
-            if sub_tx.send(dest).await.is_err() {
+            if sub_tx.send(dest.to_string()).await.is_err() {
                 return CommandResult::Error("Failed to request subscription".to_string());
             }
+            // In TUI mode, the subscription task will report success/failure
+            // In plain mode, subscribe_destination prints status
             CommandResult::Ok
         }
 
         "about" => {
             if tui_mode {
-                return CommandResult::Error(format!(
-                    "iridium-stomp v{} - MIT License - github.com/bsiegfreid/iridium-stomp",
+                return CommandResult::Info(format!(
+                    "iridium-stomp v{} - © 2025 Brad Siegfreid - MIT License",
                     env!("CARGO_PKG_VERSION")
                 ));
             }
@@ -80,7 +154,7 @@ pub async fn execute_command(
                             return CommandResult::Error(format!("Failed to write summary: {}", e));
                         }
                         if tui_mode {
-                            return CommandResult::Error(format!("Summary written to {}", filename));
+                            return CommandResult::Info(format!("Summary written to {}", filename));
                         }
                         println!("Summary written to {}", filename);
                     }
@@ -109,7 +183,7 @@ pub async fn execute_command(
                             return CommandResult::Error(format!("Failed to write report: {}", e));
                         }
                         if tui_mode {
-                            return CommandResult::Error(format!("Report written to {}", filename));
+                            return CommandResult::Info(format!("Report written to {}", filename));
                         }
                         println!("Report written to {}", filename);
                     }
@@ -135,7 +209,7 @@ pub async fn execute_command(
 
         "help" | "?" => {
             if tui_mode {
-                return CommandResult::Error(
+                return CommandResult::Info(
                     "Commands: send, sub, summary <file>, report <file>, clear, quit".to_string()
                 );
             }
@@ -164,7 +238,7 @@ pub fn print_about() {
     println!();
     println!("iridium-stomp v{}", env!("CARGO_PKG_VERSION"));
     println!();
-    println!("Copyright (c) 2025 Brad Siegfreid");
+    println!("© 2025 Brad Siegfreid");
     println!();
     println!("Licensed under the MIT License.");
     println!("See https://github.com/bsiegfreid/iridium-stomp for more information.");

@@ -44,6 +44,12 @@ pub struct AppState {
     pub heartbeat_count: u64,
     pub last_heartbeat: Option<Instant>,
 
+    /// Other counters
+    pub sent_count: u64,
+    pub error_count: u64,
+    pub warning_count: u64,
+    pub info_count: u64,
+
     /// Messages (ring buffer for display)
     pub messages: VecDeque<DisplayMessage>,
 
@@ -75,6 +81,10 @@ impl AppState {
             subscriptions: HashMap::new(),
             heartbeat_count: 0,
             last_heartbeat: None,
+            sent_count: 0,
+            error_count: 0,
+            warning_count: 0,
+            info_count: 0,
             messages: VecDeque::with_capacity(MAX_MESSAGES),
             show_headers: false,
             scroll_offset: 0,
@@ -113,9 +123,18 @@ impl AppState {
 
     /// Record a received message
     pub fn record_message(&mut self, destination: &str, body: String, headers: Vec<(String, String)>) {
-        // Update subscription stats
-        let stats = self.subscriptions.entry(destination.to_string()).or_default();
-        stats.message_count += 1;
+        // Update counters based on message type
+        match destination {
+            "SENT" => self.sent_count += 1,
+            "ERROR" | "BROKER ERROR" => self.error_count += 1,
+            "WARN" => self.warning_count += 1,
+            "INFO" => self.info_count += 1,
+            _ => {
+                // Update subscription stats for actual destinations
+                let stats = self.subscriptions.entry(destination.to_string()).or_default();
+                stats.message_count += 1;
+            }
+        }
 
         // Add to message buffer
         let msg = DisplayMessage {

@@ -69,6 +69,36 @@ pub async fn run(cli: &Cli) -> Result<(), (String, u8)> {
         }
     });
 
+    // Spawn task to monitor for ERROR frames from the broker
+    let conn_err = conn.clone();
+    let state_err = state.clone();
+    tokio::spawn(async move {
+        loop {
+            match conn_err.next_frame().await {
+                Some(iridium_stomp::ReceivedFrame::Error(err)) => {
+                    let mut s = state_err.lock().await;
+                    let msg = if let Some(ref body) = err.body {
+                        format!("{}: {}", err.message, body)
+                    } else {
+                        err.message.clone()
+                    };
+                    eprintln!("\n[BROKER ERROR] {}", msg);
+                    // Print headers for additional context
+                    for (k, v) in &err.frame.headers {
+                        eprintln!("  {}: {}", k, v);
+                    }
+                    s.record_message("BROKER ERROR", msg, err.frame.headers.clone());
+                    print!("> ");
+                    let _ = io::stdout().flush();
+                }
+                Some(iridium_stomp::ReceivedFrame::Frame(_)) => {
+                    // Other frames are handled by subscription receivers
+                }
+                None => break, // Connection closed
+            }
+        }
+    });
+
     // Channel to receive user commands from stdin reader
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<String>(16);
 
@@ -112,6 +142,9 @@ pub async fn run(cli: &Cli) -> Result<(), (String, u8)> {
                 }
                 conn.close().await;
                 break;
+            }
+            CommandResult::Info(msg) => {
+                println!("{}", msg);
             }
             CommandResult::Error(msg) => {
                 eprintln!("{}", msg);
