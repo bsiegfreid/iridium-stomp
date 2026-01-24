@@ -179,7 +179,9 @@ pub async fn execute_command(
                 let state = state.lock().await;
                 match std::fs::File::create(filename) {
                     Ok(mut file) => {
-                        if let Err(e) = writeln!(file, "{}", state.generate_summary_with_options(true, 80)) {
+                        if let Err(e) =
+                            writeln!(file, "{}", state.generate_summary_with_options(true, 80))
+                        {
                             return CommandResult::Error(format!("Failed to write report: {}", e));
                         }
                         if tui_mode {
@@ -210,14 +212,17 @@ pub async fn execute_command(
         "help" | "?" => {
             if tui_mode {
                 return CommandResult::Info(
-                    "Commands: send, sub, summary <file>, report <file>, clear, quit".to_string()
+                    "Commands: send, sub, summary <file>, report <file>, clear, quit".to_string(),
                 );
             }
             print_help();
             CommandResult::Ok
         }
 
-        _ => CommandResult::Error(format!("Unknown command: {}. Type 'help' for commands.", parts[0])),
+        _ => CommandResult::Error(format!(
+            "Unknown command: {}. Type 'help' for commands.",
+            parts[0]
+        )),
     }
 }
 
@@ -228,7 +233,9 @@ pub fn print_help() {
     println!("  sub <destination>             - Subscribe to a destination");
     println!("  about                         - Show copyright and license");
     println!("  summary [file]                - Print session summary (or save to file)");
-    println!("  report [file]                 - Full report with message history (or save to file)");
+    println!(
+        "  report [file]                 - Full report with message history (or save to file)"
+    );
     println!("  clear                         - Clear message history");
     println!("  quit                          - Exit");
 }

@@ -1,25 +1,25 @@
 use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use iridium_stomp::{Connection, ConnectOptions, Frame};
 use iridium_stomp::connection::AckMode;
+use iridium_stomp::{ConnectOptions, Connection, Frame};
 use ratatui::{
+    Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Row, Table, Wrap},
-    Terminal,
 };
 use std::io::{self, Stdout};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-use super::state::{SharedState, new_shared_state};
-use super::commands::{execute_command, CommandResult};
 use super::args::Cli;
+use super::commands::{CommandResult, execute_command};
+use super::state::{SharedState, new_shared_state};
 
 /// TUI Application
 pub struct App {
@@ -42,7 +42,8 @@ impl App {
 pub async fn run(cli: &Cli) -> Result<(), (String, u8)> {
     // Parse heartbeat to get interval for state
     let hb_parts: Vec<&str> = cli.heartbeat.split(',').collect();
-    let hb_interval = hb_parts.get(1)
+    let hb_interval = hb_parts
+        .get(1)
         .and_then(|s| s.trim().parse::<u32>().ok())
         .unwrap_or(10000);
 
@@ -50,8 +51,7 @@ pub async fn run(cli: &Cli) -> Result<(), (String, u8)> {
     let (hb_tx, mut hb_rx) = mpsc::channel::<()>(16);
 
     // Build connection options
-    let options = ConnectOptions::default()
-        .with_heartbeat_notify(hb_tx);
+    let options = ConnectOptions::default().with_heartbeat_notify(hb_tx);
 
     let conn = Connection::connect_with_options(
         &cli.address,
@@ -59,14 +59,12 @@ pub async fn run(cli: &Cli) -> Result<(), (String, u8)> {
         &cli.passcode,
         &cli.heartbeat,
         options,
-    ).await.map_err(|e| super::plain::format_connection_error_pub(&e, &cli.address))?;
+    )
+    .await
+    .map_err(|e| super::plain::format_connection_error_pub(&e, &cli.address))?;
 
     // Create shared state
-    let state = new_shared_state(
-        cli.address.clone(),
-        cli.login.clone(),
-        hb_interval,
-    );
+    let state = new_shared_state(cli.address.clone(), cli.login.clone(), hb_interval);
 
     // Channel for new subscription requests
     let (sub_tx, mut sub_rx) = mpsc::channel::<String>(16);
@@ -133,8 +131,8 @@ pub async fn run(cli: &Cli) -> Result<(), (String, u8)> {
     execute!(stdout, EnterAlternateScreen)
         .map_err(|e| (format!("Failed to setup terminal: {}", e), 1))?;
     let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)
-        .map_err(|e| (format!("Failed to create terminal: {}", e), 1))?;
+    let mut terminal =
+        Terminal::new(backend).map_err(|e| (format!("Failed to create terminal: {}", e), 1))?;
 
     // Create app
     let app = App::new(conn.clone(), state.clone());
@@ -144,10 +142,7 @@ pub async fn run(cli: &Cli) -> Result<(), (String, u8)> {
 
     // Restore terminal
     disable_raw_mode().ok();
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen
-    ).ok();
+    execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
     terminal.show_cursor().ok();
 
     // Print summary if requested
@@ -171,7 +166,8 @@ async fn run_app(
         // Draw UI
         {
             let state = app.state.lock().await;
-            terminal.draw(|f| ui(f, &state))
+            terminal
+                .draw(|f| ui(f, &state))
                 .map_err(|e| (format!("Draw error: {}", e), 1))?;
         }
 
@@ -180,8 +176,7 @@ async fn run_app(
             .map_err(|e| (format!("Event poll error: {}", e), 1))?;
 
         if has_event {
-            let evt = event::read()
-                .map_err(|e| (format!("Event read error: {}", e), 1))?;
+            let evt = event::read().map_err(|e| (format!("Event read error: {}", e), 1))?;
 
             if let Event::Key(key) = evt {
                 match key.code {
@@ -235,7 +230,15 @@ async fn run_app(
                             input
                         };
                         if !input.is_empty() {
-                            match execute_command(&input, &app.conn, app.state.clone(), sub_tx, true).await {
+                            match execute_command(
+                                &input,
+                                &app.conn,
+                                app.state.clone(),
+                                sub_tx,
+                                true,
+                            )
+                            .await
+                            {
                                 CommandResult::Ok => {}
                                 CommandResult::Quit => {
                                     app.should_quit = true;
@@ -317,10 +320,10 @@ fn ui(f: &mut ratatui::Frame, state: &super::state::AppState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Length(6 + state.subscriptions.len().min(5) as u16),  // Subscriptions
-            Constraint::Min(5),     // Messages
-            Constraint::Length(3),  // Input
+            Constraint::Length(3),                                           // Header
+            Constraint::Length(6 + state.subscriptions.len().min(5) as u16), // Subscriptions
+            Constraint::Min(5),                                              // Messages
+            Constraint::Length(3),                                           // Input
         ])
         .split(size);
 
@@ -342,7 +345,9 @@ fn render_header(f: &mut ratatui::Frame, area: Rect, state: &super::state::AppSt
     let hb_secs = state.heartbeat_interval_ms / 1000;
 
     let hb_style = if is_pulsing {
-        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD)
     } else if hb_indicator == "!" {
         Style::default().fg(Color::Red)
     } else {
@@ -350,17 +355,18 @@ fn render_header(f: &mut ratatui::Frame, area: Rect, state: &super::state::AppSt
     };
 
     let header_line = Line::from(vec![
-        Span::raw(format!(" Host: {}    User: {}    Heartbeat: ", state.host, state.user)),
+        Span::raw(format!(
+            " Host: {}    User: {}    Heartbeat: ",
+            state.host, state.user
+        )),
         Span::styled(hb_indicator, hb_style),
         Span::raw(format!(" ({}s)", hb_secs)),
     ]);
 
     let title = format!(" iridium-stomp ─── {} ", state.session_duration());
 
-    let header = Paragraph::new(header_line)
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .title(title));
+    let header =
+        Paragraph::new(header_line).block(Block::default().borders(Borders::ALL).title(title));
 
     f.render_widget(header, area);
 }
@@ -372,48 +378,73 @@ fn render_counts(f: &mut ratatui::Frame, area: Rect, state: &super::state::AppSt
     let mut sorted_subs: Vec<_> = state.subscriptions.iter().collect();
     sorted_subs.sort_by(|a, b| a.0.cmp(b.0));
     for (dest, stats) in sorted_subs {
-        rows.push(Row::new(vec![dest.clone(), stats.message_count.to_string()])
-            .style(Style::default().fg(Color::Green)));
+        rows.push(
+            Row::new(vec![dest.clone(), stats.message_count.to_string()])
+                .style(Style::default().fg(Color::Green)),
+        );
     }
 
     // Add other counts if non-zero
     if state.sent_count > 0 {
-        rows.push(Row::new(vec!["Sent".to_string(), state.sent_count.to_string()])
-            .style(Style::default().fg(Color::Blue)));
+        rows.push(
+            Row::new(vec!["Sent".to_string(), state.sent_count.to_string()])
+                .style(Style::default().fg(Color::Blue)),
+        );
     }
     if state.info_count > 0 {
-        rows.push(Row::new(vec!["Info".to_string(), state.info_count.to_string()])
-            .style(Style::default().fg(Color::Cyan)));
+        rows.push(
+            Row::new(vec!["Info".to_string(), state.info_count.to_string()])
+                .style(Style::default().fg(Color::Cyan)),
+        );
     }
     if state.warning_count > 0 {
-        rows.push(Row::new(vec!["Warnings".to_string(), state.warning_count.to_string()])
-            .style(Style::default().fg(Color::Yellow)));
+        rows.push(
+            Row::new(vec![
+                "Warnings".to_string(),
+                state.warning_count.to_string(),
+            ])
+            .style(Style::default().fg(Color::Yellow)),
+        );
     }
     if state.error_count > 0 {
-        rows.push(Row::new(vec!["Errors".to_string(), state.error_count.to_string()])
-            .style(Style::default().fg(Color::Red)));
+        rows.push(
+            Row::new(vec!["Errors".to_string(), state.error_count.to_string()])
+                .style(Style::default().fg(Color::Red)),
+        );
     }
 
     // Add total row
-    let total = state.total_message_count() + state.sent_count + state.info_count + state.warning_count + state.error_count;
+    let total = state.total_message_count()
+        + state.sent_count
+        + state.info_count
+        + state.warning_count
+        + state.error_count;
     if !rows.is_empty() {
         rows.push(Row::new(vec!["".to_string(), "─────────".to_string()]));
-        rows.push(Row::new(vec!["Total".to_string(), total.to_string()])
-            .style(Style::default().add_modifier(Modifier::BOLD)));
+        rows.push(
+            Row::new(vec!["Total".to_string(), total.to_string()])
+                .style(Style::default().add_modifier(Modifier::BOLD)),
+        );
     }
 
     let widths = [Constraint::Percentage(80), Constraint::Percentage(20)];
     let table = Table::new(rows, widths)
-        .header(Row::new(vec!["Activity", "Count"])
-            .style(Style::default().add_modifier(Modifier::BOLD))
-            .bottom_margin(1))
+        .header(
+            Row::new(vec!["Activity", "Count"])
+                .style(Style::default().add_modifier(Modifier::BOLD))
+                .bottom_margin(1),
+        )
         .block(Block::default().borders(Borders::ALL));
 
     f.render_widget(table, area);
 }
 
 fn render_messages(f: &mut ratatui::Frame, area: Rect, state: &super::state::AppState) {
-    let header_hint = if state.show_headers { "[^H] hide headers" } else { "[^H] show headers" };
+    let header_hint = if state.show_headers {
+        "[^H] hide headers"
+    } else {
+        "[^H] show headers"
+    };
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -462,20 +493,12 @@ fn render_messages(f: &mut ratatui::Frame, area: Rect, state: &super::state::App
                 Style::default().fg(Color::DarkGray),
                 80,
             ),
-            "SENT" => (
-                Style::default().fg(Color::Blue),
-                Style::default(),
-                60,
-            ),
-            _ => (
-                Style::default().fg(Color::Cyan),
-                Style::default(),
-                60,
-            ),
+            "SENT" => (Style::default().fg(Color::Blue), Style::default(), 60),
+            _ => (Style::default().fg(Color::Cyan), Style::default(), 60),
         };
 
         let dest_display = if msg.destination.len() > 20 {
-            format!("...{}", &msg.destination[msg.destination.len()-17..])
+            format!("...{}", &msg.destination[msg.destination.len() - 17..])
         } else {
             msg.destination.clone()
         };
@@ -507,9 +530,10 @@ fn render_messages(f: &mut ratatui::Frame, area: Rect, state: &super::state::App
                 } else {
                     header_line
                 };
-                lines.push(Line::from(vec![
-                    Span::styled(truncated, Style::default().fg(Color::DarkGray)),
-                ]));
+                lines.push(Line::from(vec![Span::styled(
+                    truncated,
+                    Style::default().fg(Color::DarkGray),
+                )]));
             }
         }
     }
@@ -541,10 +565,12 @@ async fn subscribe_destination(
     dest: &str,
     state: SharedState,
 ) -> Result<(), (String, u8)> {
-    let sub = conn
-        .subscribe(dest, AckMode::Auto)
-        .await
-        .map_err(|e| (format!("Failed to subscribe to '{}': {}", dest, e), super::exit_codes::PROTOCOL_ERROR))?;
+    let sub = conn.subscribe(dest, AckMode::Auto).await.map_err(|e| {
+        (
+            format!("Failed to subscribe to '{}': {}", dest, e),
+            super::exit_codes::PROTOCOL_ERROR,
+        )
+    })?;
 
     // Register in state
     {

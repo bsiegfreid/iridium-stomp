@@ -388,7 +388,10 @@ impl std::fmt::Debug for ConnectOptions {
             .field("client_id", &self.client_id)
             .field("host", &self.host)
             .field("headers", &self.headers)
-            .field("heartbeat_tx", &self.heartbeat_tx.as_ref().map(|_| "Some(...)"))
+            .field(
+                "heartbeat_tx",
+                &self.heartbeat_tx.as_ref().map(|_| "Some(...)"),
+            )
             .finish()
     }
 }

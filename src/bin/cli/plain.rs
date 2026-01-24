@@ -1,11 +1,11 @@
-use iridium_stomp::{Connection, ConnectOptions, Frame};
 use iridium_stomp::connection::{AckMode, ConnError};
+use iridium_stomp::{ConnectOptions, Connection, Frame};
 use std::io::{self, BufRead, Write};
 use tokio::sync::mpsc;
 
-use super::state::{SharedState, new_shared_state};
-use super::commands::{execute_command, print_help, CommandResult};
 use super::args::Cli;
+use super::commands::{CommandResult, execute_command, print_help};
+use super::state::{SharedState, new_shared_state};
 
 /// Run the CLI in plain (non-TUI) mode
 pub async fn run(cli: &Cli) -> Result<(), (String, u8)> {
@@ -13,7 +13,8 @@ pub async fn run(cli: &Cli) -> Result<(), (String, u8)> {
 
     // Parse heartbeat to get interval for state
     let hb_parts: Vec<&str> = cli.heartbeat.split(',').collect();
-    let hb_interval = hb_parts.get(1)
+    let hb_interval = hb_parts
+        .get(1)
         .and_then(|s| s.trim().parse::<u32>().ok())
         .unwrap_or(10000);
 
@@ -21,8 +22,7 @@ pub async fn run(cli: &Cli) -> Result<(), (String, u8)> {
     let (hb_tx, mut hb_rx) = mpsc::channel::<()>(16);
 
     // Build connection options
-    let options = ConnectOptions::default()
-        .with_heartbeat_notify(hb_tx);
+    let options = ConnectOptions::default().with_heartbeat_notify(hb_tx);
 
     let conn = Connection::connect_with_options(
         &cli.address,
@@ -30,16 +30,14 @@ pub async fn run(cli: &Cli) -> Result<(), (String, u8)> {
         &cli.passcode,
         &cli.heartbeat,
         options,
-    ).await.map_err(|e| format_connection_error(&e, &cli.address))?;
+    )
+    .await
+    .map_err(|e| format_connection_error(&e, &cli.address))?;
 
     println!("Connected.");
 
     // Create shared state
-    let state = new_shared_state(
-        cli.address.clone(),
-        cli.login.clone(),
-        hb_interval,
-    );
+    let state = new_shared_state(cli.address.clone(), cli.login.clone(), hb_interval);
 
     // Channel for new subscription requests
     let (sub_tx, mut sub_rx) = mpsc::channel::<String>(16);
@@ -63,7 +61,8 @@ pub async fn run(cli: &Cli) -> Result<(), (String, u8)> {
     let state_sub = state.clone();
     tokio::spawn(async move {
         while let Some(dest) = sub_rx.recv().await {
-            if let Err((msg, _)) = subscribe_destination(&conn_sub, &dest, state_sub.clone()).await {
+            if let Err((msg, _)) = subscribe_destination(&conn_sub, &dest, state_sub.clone()).await
+            {
                 eprintln!("{}", msg);
             }
         }
@@ -161,10 +160,12 @@ async fn subscribe_destination(
     dest: &str,
     state: SharedState,
 ) -> Result<(), (String, u8)> {
-    let sub = conn
-        .subscribe(dest, AckMode::Auto)
-        .await
-        .map_err(|e| (format!("Failed to subscribe to '{}': {}", dest, e), super::exit_codes::PROTOCOL_ERROR))?;
+    let sub = conn.subscribe(dest, AckMode::Auto).await.map_err(|e| {
+        (
+            format!("Failed to subscribe to '{}': {}", dest, e),
+            super::exit_codes::PROTOCOL_ERROR,
+        )
+    })?;
 
     println!("Subscribed to: {}", dest);
 

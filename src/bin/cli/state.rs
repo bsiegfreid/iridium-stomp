@@ -122,7 +122,12 @@ impl AppState {
     }
 
     /// Record a received message
-    pub fn record_message(&mut self, destination: &str, body: String, headers: Vec<(String, String)>) {
+    pub fn record_message(
+        &mut self,
+        destination: &str,
+        body: String,
+        headers: Vec<(String, String)>,
+    ) {
         // Update counters based on message type
         match destination {
             "SENT" => self.sent_count += 1,
@@ -131,7 +136,10 @@ impl AppState {
             "INFO" => self.info_count += 1,
             _ => {
                 // Update subscription stats for actual destinations
-                let stats = self.subscriptions.entry(destination.to_string()).or_default();
+                let stats = self
+                    .subscriptions
+                    .entry(destination.to_string())
+                    .or_default();
                 stats.message_count += 1;
             }
         }
@@ -154,7 +162,9 @@ impl AppState {
 
     /// Register a subscription destination
     pub fn register_subscription(&mut self, destination: &str) {
-        self.subscriptions.entry(destination.to_string()).or_default();
+        self.subscriptions
+            .entry(destination.to_string())
+            .or_default();
     }
 
     /// Get total message count across all subscriptions
@@ -245,7 +255,11 @@ impl AppState {
     }
 
     /// Generate session report with optional message history
-    pub fn generate_summary_with_options(&self, include_messages: bool, max_width: usize) -> String {
+    pub fn generate_summary_with_options(
+        &self,
+        include_messages: bool,
+        max_width: usize,
+    ) -> String {
         let end_time = Local::now();
         let duration = end_time.signed_duration_since(self.start_time);
         let total_secs = duration.num_seconds();
@@ -253,13 +267,25 @@ impl AppState {
         let secs = total_secs % 60;
 
         let mut lines = Vec::new();
-        lines.push("═══════════════════════════════════════════════════════════════════════════════".to_string());
+        lines.push(
+            "═══════════════════════════════════════════════════════════════════════════════"
+                .to_string(),
+        );
         lines.push("  iridium-stomp Session Report".to_string());
-        lines.push("═══════════════════════════════════════════════════════════════════════════════".to_string());
+        lines.push(
+            "═══════════════════════════════════════════════════════════════════════════════"
+                .to_string(),
+        );
         lines.push(format!("  Host:       {}", self.host));
         lines.push(format!("  User:       {}", self.user));
-        lines.push(format!("  Started:    {}", self.start_time.format("%Y-%m-%d %H:%M:%S")));
-        lines.push(format!("  Ended:      {}", end_time.format("%Y-%m-%d %H:%M:%S")));
+        lines.push(format!(
+            "  Started:    {}",
+            self.start_time.format("%Y-%m-%d %H:%M:%S")
+        ));
+        lines.push(format!(
+            "  Ended:      {}",
+            end_time.format("%Y-%m-%d %H:%M:%S")
+        ));
         lines.push(format!("  Duration:   {}m {}s", mins, secs));
         lines.push(String::new());
         lines.push("  Subscriptions:".to_string());
@@ -268,21 +294,42 @@ impl AppState {
         let mut subs: Vec<_> = self.subscriptions.iter().collect();
         subs.sort_by(|a, b| b.1.message_count.cmp(&a.1.message_count));
 
-        let max_dest_len = subs.iter().map(|(d, _)| d.len()).max().unwrap_or(20).min(40);
+        let max_dest_len = subs
+            .iter()
+            .map(|(d, _)| d.len())
+            .max()
+            .unwrap_or(20)
+            .min(40);
         for (dest, stats) in &subs {
             let dest_display = truncate_str(dest, max_dest_len);
-            lines.push(format!("    {:width$} {:>6}", dest_display, stats.message_count, width = max_dest_len));
+            lines.push(format!(
+                "    {:width$} {:>6}",
+                dest_display,
+                stats.message_count,
+                width = max_dest_len
+            ));
         }
         lines.push(format!("    {:─>width$}", "", width = max_dest_len + 7));
-        lines.push(format!("    {:width$} {:>6}", "Total", self.total_message_count(), width = max_dest_len));
+        lines.push(format!(
+            "    {:width$} {:>6}",
+            "Total",
+            self.total_message_count(),
+            width = max_dest_len
+        ));
         lines.push(String::new());
         lines.push(format!("  Heartbeats received: {}", self.heartbeat_count));
 
         if include_messages && !self.messages.is_empty() {
             lines.push(String::new());
-            lines.push("───────────────────────────────────────────────────────────────────────────────".to_string());
+            lines.push(
+                "───────────────────────────────────────────────────────────────────────────────"
+                    .to_string(),
+            );
             lines.push("  Message History".to_string());
-            lines.push("───────────────────────────────────────────────────────────────────────────────".to_string());
+            lines.push(
+                "───────────────────────────────────────────────────────────────────────────────"
+                    .to_string(),
+            );
 
             for msg in &self.messages {
                 let time = msg.timestamp.format("%H:%M:%S").to_string();
@@ -293,7 +340,10 @@ impl AppState {
             }
         }
 
-        lines.push("═══════════════════════════════════════════════════════════════════════════════".to_string());
+        lines.push(
+            "═══════════════════════════════════════════════════════════════════════════════"
+                .to_string(),
+        );
 
         lines.join("\n")
     }
