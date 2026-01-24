@@ -359,7 +359,7 @@ impl AckMode {
 ///     options,
 /// ).await?;
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ConnectOptions {
     /// STOMP version(s) to accept (e.g., "1.2" or "1.0,1.1,1.2").
     /// Defaults to "1.2" if not set.
@@ -374,6 +374,23 @@ pub struct ConnectOptions {
     /// Additional custom headers to include in the CONNECT frame.
     /// Note: Headers that would override critical STOMP headers are ignored.
     pub headers: Vec<(String, String)>,
+
+    /// Optional channel to receive heartbeat notifications.
+    /// When set, the connection will send a `()` on this channel each time
+    /// a heartbeat is received from the server.
+    pub heartbeat_tx: Option<mpsc::Sender<()>>,
+}
+
+impl std::fmt::Debug for ConnectOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnectOptions")
+            .field("accept_version", &self.accept_version)
+            .field("client_id", &self.client_id)
+            .field("host", &self.host)
+            .field("headers", &self.headers)
+            .field("heartbeat_tx", &self.heartbeat_tx.as_ref().map(|_| "Some(...)"))
+            .finish()
+    }
 }
 
 impl ConnectOptions {
@@ -409,6 +426,32 @@ impl ConnectOptions {
     /// Add a custom header to the CONNECT frame (builder style).
     pub fn header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.push((key.into(), value.into()));
+        self
+    }
+
+    /// Set a channel to receive heartbeat notifications (builder style).
+    ///
+    /// When set, the connection will send a `()` on this channel each time
+    /// a heartbeat is received from the server. This is useful for CLI tools
+    /// or monitoring applications that want to display heartbeat status.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tokio::sync::mpsc;
+    /// use iridium_stomp::ConnectOptions;
+    ///
+    /// let (tx, mut rx) = mpsc::channel(16);
+    /// let options = ConnectOptions::default()
+    ///     .with_heartbeat_notify(tx);
+    ///
+    /// // In another task:
+    /// while rx.recv().await.is_some() {
+    ///     println!("Heartbeat received!");
+    /// }
+    /// ```
+    pub fn with_heartbeat_notify(mut self, tx: mpsc::Sender<()>) -> Self {
+        self.heartbeat_tx = Some(tx);
         self
     }
 }
@@ -631,6 +674,7 @@ impl Connection {
         let host = options.host.unwrap_or_else(|| "/".to_string());
         let client_id = options.client_id;
         let custom_headers = options.headers;
+        let heartbeat_notify_tx = options.heartbeat_tx;
 
         // Perform initial connection and STOMP handshake before spawning background task.
         // This ensures authentication errors are returned to the caller immediately.
@@ -801,7 +845,12 @@ impl Connection {
                         }
                         item = stream.next() => {
                             match item {
-                                Some(Ok(StompItem::Heartbeat)) => { last_received.store(current_millis(), Ordering::SeqCst); }
+                                Some(Ok(StompItem::Heartbeat)) => {
+                                    last_received.store(current_millis(), Ordering::SeqCst);
+                                    if let Some(ref tx) = heartbeat_notify_tx {
+                                        let _ = tx.try_send(());
+                                    }
+                                }
                                 Some(Ok(StompItem::Frame(f))) => {
                                     last_received.store(current_millis(), Ordering::SeqCst);
                                     // Dispatch MESSAGE frames to any matching subscribers.

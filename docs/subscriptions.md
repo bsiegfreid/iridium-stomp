@@ -118,7 +118,7 @@ and persist it for resubscribe on reconnect.
 
 Example:
 
-   ```rust
+   ```rust,no_run
    use iridium_stomp::{Connection, ConnectOptions, SubscriptionOptions};
    use iridium_stomp::connection::AckMode;
    use tokio::runtime::Runtime;
