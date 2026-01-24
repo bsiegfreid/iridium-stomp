@@ -1,0 +1,28 @@
+═══════════════════════════════════════════════════════════════════════════════
+  iridium-stomp Session Report
+═══════════════════════════════════════════════════════════════════════════════
+  Host:       127.0.0.1:61613
+  User:       guest
+  Started:    2026-01-24 09:36:00
+  Ended:      2026-01-24 09:38:22
+  Duration:   2m 21s
+
+  Subscriptions:
+    /topic/test      4
+    ──────────────────
+    Total            4
+
+  Heartbeats received: 26
+
+───────────────────────────────────────────────────────────────────────────────
+  Message History
+───────────────────────────────────────────────────────────────────────────────
+  09:36:31 [SENT] [/topic/test] this is a message
+  09:36:31 [/topic/test] this is a message
+  09:36:42 [SENT] [/topic/test] this is a message
+  09:36:42 [/topic/test] this is a message
+  09:36:43 [SENT] [/topic/test] this is a message
+  09:36:43 [/topic/test] this is a message
+  09:36:44 [SENT] [/topic/test] this is a message
+  09:36:44 [/topic/test] this is a message
+═══════════════════════════════════════════════════════════════════════════════

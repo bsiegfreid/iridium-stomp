@@ -203,6 +203,36 @@ fn connect_options_multiple_custom_headers() {
 }
 
 // ============================================================================
+// Heartbeat notification tests
+// ============================================================================
+
+#[test]
+fn connect_options_heartbeat_notify_default_none() {
+    let opts = ConnectOptions::default();
+    assert!(opts.heartbeat_tx.is_none());
+}
+
+#[test]
+fn connect_options_heartbeat_notify_sets_channel() {
+    let (tx, _rx) = tokio::sync::mpsc::channel::<()>(16);
+    let opts = ConnectOptions::default().with_heartbeat_notify(tx);
+    assert!(opts.heartbeat_tx.is_some());
+}
+
+#[test]
+fn connect_options_heartbeat_notify_chainable() {
+    let (tx, _rx) = tokio::sync::mpsc::channel::<()>(16);
+    let opts = ConnectOptions::default()
+        .client_id("test-client")
+        .with_heartbeat_notify(tx)
+        .host("localhost");
+
+    assert!(opts.heartbeat_tx.is_some());
+    assert_eq!(opts.client_id, Some("test-client".to_string()));
+    assert_eq!(opts.host, Some("localhost".to_string()));
+}
+
+// ============================================================================
 // Documentation: Critical header protection
 // ============================================================================
 //

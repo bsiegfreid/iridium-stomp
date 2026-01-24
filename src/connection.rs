@@ -438,6 +438,13 @@ impl ConnectOptions {
     /// a heartbeat is received from the server. This is useful for CLI tools
     /// or monitoring applications that want to display heartbeat status.
     ///
+    /// # Note
+    ///
+    /// Notifications are sent using `try_send()` to avoid blocking the
+    /// connection's background task. If the channel buffer is full,
+    /// notifications will be silently dropped. Use a sufficiently sized
+    /// channel buffer (e.g., 16) to avoid missing notifications.
+    ///
     /// # Example
     ///
     /// ```ignore
