@@ -297,20 +297,26 @@ fn ui(f: &mut ratatui::Frame, state: &super::state::AppState) {
 }
 
 fn render_header(f: &mut ratatui::Frame, area: Rect, state: &super::state::AppState) {
-    let hb_indicator = state.heartbeat_indicator();
+    let (hb_indicator, is_pulsing) = state.heartbeat_indicator();
     let hb_secs = state.heartbeat_interval_ms / 1000;
 
-    let header_text = format!(
-        " Host: {}    User: {}    Heartbeat: {} ({}s)",
-        state.host,
-        state.user,
-        hb_indicator,
-        hb_secs
-    );
+    let hb_style = if is_pulsing {
+        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+    } else if hb_indicator == "!" {
+        Style::default().fg(Color::Red)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let header_line = Line::from(vec![
+        Span::raw(format!(" Host: {}    User: {}    Heartbeat: ", state.host, state.user)),
+        Span::styled(hb_indicator, hb_style),
+        Span::raw(format!(" ({}s)", hb_secs)),
+    ]);
 
     let title = format!(" iridium-stomp ─── {} ", state.session_duration());
 
-    let header = Paragraph::new(header_text)
+    let header = Paragraph::new(header_line)
         .block(Block::default()
             .borders(Borders::ALL)
             .title(title));

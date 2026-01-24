@@ -82,19 +82,22 @@ impl AppState {
         self.last_heartbeat = Some(Instant::now());
     }
 
-    /// Get the heartbeat indicator character
-    pub fn heartbeat_indicator(&self) -> &'static str {
+    /// Get the heartbeat indicator character and whether it's "pulsing"
+    /// Returns (indicator, is_pulsing)
+    pub fn heartbeat_indicator(&self) -> (&'static str, bool) {
         match self.last_heartbeat {
             Some(last) => {
                 let elapsed = last.elapsed().as_millis() as u32;
-                // Consider heartbeat "active" if within 2x the expected interval
-                if elapsed < self.heartbeat_interval_ms * 2 {
-                    "◉" // Filled circle - heartbeat active
+                // Pulse for 1 second after heartbeat
+                if elapsed < 1000 {
+                    ("✦", true) // Four pointed star - just received
+                } else if elapsed < self.heartbeat_interval_ms * 2 {
+                    ("◇", false) // Diamond outline - healthy
                 } else {
-                    "!" // Warning - heartbeat late
+                    ("!", false) // Warning - heartbeat late
                 }
             }
-            None => "○", // Empty circle - no heartbeat yet
+            None => ("○", false), // Empty circle - no heartbeat yet
         }
     }
 
