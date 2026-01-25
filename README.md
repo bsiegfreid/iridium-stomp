@@ -4,7 +4,7 @@
 
 An asynchronous STOMP 1.2 client library for Rust.
 
-> **Early Development**: This library is heavily tested (150+ unit and fuzz tests) but has not yet been battle-tested in production environments. APIs may change. Use with appropriate caution.
+> **Early Development**: This library is heavily tested (300+ unit and fuzz tests) but has not yet been battle-tested in production environments. APIs may change. Use with appropriate caution.
 
 ## Design Goals
 
@@ -261,9 +261,24 @@ stomp -a broker.example.com:61613 -l myuser -p mypass -s /queue/events
 
 # Subscribe to multiple queues
 stomp -s /queue/orders -s /queue/notifications
+
+# Enable TUI mode for live monitoring
+stomp --tui -a 127.0.0.1:61613 -s /topic/events
 ```
 
-Interactive commands:
+### TUI Mode
+
+The `--tui` flag enables a full terminal interface with:
+
+- **Activity panel** - Live subscription counts with color coding
+- **Message panel** - Scrollable message history with timestamps
+- **Heartbeat indicator** - Animated pulse showing connection health
+- **Command history** - Up/down arrows to navigate previous commands
+- **Header toggle** - Press `Ctrl+H` to show/hide message headers
+
+### Plain Mode
+
+Without `--tui`, the CLI runs in plain mode with simple scrolling output:
 
 ```text
 > send /queue/test Hello, World!
@@ -287,13 +302,19 @@ Disconnecting...
 Start a local STOMP broker (RabbitMQ with STOMP plugin):
 
 ```bash
-docker compose up -d
+docker stack deploy -c rabbitmq-stack.yaml rabbitmq
 ```
 
 Run the quickstart example:
 
 ```bash
 cargo run --example quickstart
+```
+
+Stop the broker:
+
+```bash
+docker stack rm rabbitmq
 ```
 
 ## Testing
@@ -344,18 +365,18 @@ Use the provided helper script which mimics the CI workflow:
 ./scripts/test-with-rabbit.sh
 ```
 
-Or manually with docker-compose:
+Or manually with docker swarm:
 
 ```bash
 # Start RabbitMQ with STOMP
-docker compose up -d
+docker stack deploy -c rabbitmq-stack.yaml rabbitmq
 
 # Wait for it to be ready (management UI at http://localhost:15672)
 # Then run the smoke test
 RUN_STOMP_SMOKE=1 cargo test --test stomp_smoke
 
 # Cleanup
-docker compose down -v
+docker stack rm rabbitmq
 ```
 
 The smoke test is skipped by default unless `RUN_STOMP_SMOKE=1` is set, since it requires an external broker.
