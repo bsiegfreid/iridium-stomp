@@ -3,7 +3,6 @@ version: '3.8'
 services:
   rabbitmq:
     image: rabbitmq:3.11-management
-    container_name: iridium_rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
@@ -24,4 +23,4 @@ services:
 
 volumes:
   rabbitmq_data:
-    name: iridium_rabbitmq_data
+    name: rabbitmq_data

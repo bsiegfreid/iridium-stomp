@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-01-24
+
+### Fixed
+
+- Update `ratatui` to 0.30 to fix transitive `lru` vulnerability (RUSTSEC-2026-0002)
+
+## [0.3.0] - 2026-01-24
+
+### Added
+
+- Full TUI mode for CLI with `--tui` flag ([#54])
+  - Activity panel with live subscription counts and color coding
+  - Message panel with scrollable history and timestamps
+  - Animated heartbeat indicator (✦ pulse when active, ◇ idle, ! late)
+  - Command history navigation with up/down arrows
+  - Header toggle with Ctrl+H
+  - Session reports with `report <file>` and `summary <file>` commands
+  - Destination validation with warnings for non-standard patterns
+  - Color-coded messages: errors (red), warnings (yellow), info (cyan), sent (blue)
+- `ConnectOptions::with_heartbeat_notify()` for subscribing to heartbeat events
+- `--summary` CLI flag to print session summary on exit
+
+### Changed
+
+- CLI refactored into modular structure (args, commands, state, tui, plain modules)
+
 ## [0.2.1] - 2026-01-22
 
 ### Fixed
@@ -82,7 +108,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Feature-gated CLI (`--features cli`)
 - Comprehensive test suite (150+ tests)
 
-[Unreleased]: https://github.com/bsiegfreid/iridium-stomp/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/bsiegfreid/iridium-stomp/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/bsiegfreid/iridium-stomp/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/bsiegfreid/iridium-stomp/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/bsiegfreid/iridium-stomp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/bsiegfreid/iridium-stomp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/bsiegfreid/iridium-stomp/releases/tag/v0.1.0
@@ -92,3 +120,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#35]: https://github.com/bsiegfreid/iridium-stomp/issues/35
 [#36]: https://github.com/bsiegfreid/iridium-stomp/issues/36
 [#37]: https://github.com/bsiegfreid/iridium-stomp/pull/37
+[#54]: https://github.com/bsiegfreid/iridium-stomp/pull/54

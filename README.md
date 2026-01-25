@@ -6,27 +6,9 @@ An asynchronous STOMP 1.2 client library for Rust.
 
 > **Early Development**: This library is heavily tested (150+ unit and fuzz tests) but has not yet been battle-tested in production environments. APIs may change. Use with appropriate caution.
 
-## Motivation
-
-STOMP is deceptively simple on the surface—text-based frames, straightforward
-commands, easy to read with `nc` or `telnet`. But the details matter:
-
-- **Heartbeats** need to be negotiated correctly, or your connection dies
-  unexpectedly
-- **TCP chunking** means frames can arrive in arbitrary pieces, and your parser
-  better handle that gracefully
-- **Binary bodies** with embedded NUL bytes require content-length headers,
-  which many implementations get wrong
-- **Reconnection** should be automatic and transparent, not something you have
-  to build yourself
-
-I wanted a library that handled all of this correctly, without me having to
-think about it every time I wrote application code.
-
 ## Design Goals
 
-- **Async-first architecture** — Built on Tokio from the ground up, not bolted
-  on as an afterthought.
+- **Async-first architecture** — Built on Tokio from the ground up.
 
 - **Correct frame parsing** — Handles arbitrary TCP chunk boundaries, binary
   bodies with embedded NULs, and the full STOMP 1.2 frame format.
@@ -43,28 +25,6 @@ think about it every time I wrote application code.
 
 - **Production-ready testing** — 150+ tests including fuzz testing, stress
   testing, and regression capture for previously-failing edge cases.
-
-## Non-Goals
-
-There are some things this library intentionally does *not* try to be:
-
-- A full STOMP server implementation
-- A message queue abstraction layer
-- Compatible with STOMP versions prior to 1.2
-- A broker-specific client (ActiveMQ extensions, RabbitMQ-specific features)
-
-iridium-stomp is a STOMP 1.2 client library. If you need broker-specific
-features, you can pass custom headers through `subscribe_with_headers` or
-`SubscriptionOptions`, but the library itself stays protocol-focused.
-
-## Installation
-
-Add to your `Cargo.toml`:
-
-```toml
-[dependencies]
-iridium-stomp = { git = "https://github.com/bsiegfreid/iridium-stomp", branch = "main" }
-```
 
 ## Quick Start
 
@@ -354,7 +314,9 @@ cargo test --test codec_stress      # Concurrent stress testing
 
 ### Integration Tests in CI
 
-The CI workflow includes a smoke integration test that verifies the library works against a real RabbitMQ broker with STOMP enabled. This test ensures end-to-end functionality beyond unit tests.
+The CI workflow includes a smoke integration test that verifies the library
+works against a real RabbitMQ broker with STOMP enabled. This test ensures
+end-to-end functionality beyond unit tests.
 
 **How it works:**
 
@@ -398,32 +360,8 @@ docker compose down -v
 
 The smoke test is skipped by default unless `RUN_STOMP_SMOKE=1` is set, since it requires an external broker.
 
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, running tests
-locally, and CI information.
-
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for
 details.
 
-## About iridiumdesign
-
-Iridiumdesign—and the iridiumdesign.com domain—started back in 2000 while I was
-finishing design school. At the time, it was meant to support freelance work in
-graphic design and web development.
-
-Over the years, as I moved into full-time corporate software engineering,
-Iridiumdesign became less of a business and more of a sandbox. It's where I
-experiment, learn, and build things that don't always fit neatly into my day
-job.
-
-These days I'm a senior software engineer and don't do much design work
-anymore, but the *iridium* name stuck. I use it as a prefix for my personal
-libraries and projects so they're easy to identify and group together.
-
-iridium-stomp is one of those projects: something I built because I needed it,
-learned from, and decided was worth sharing.
-
-*Brad Siegfreid*
