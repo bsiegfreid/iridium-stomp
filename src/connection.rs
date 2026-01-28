@@ -842,7 +842,7 @@ impl Connection {
                 };
                 let watchdog_half = recv_interval.map(|d| d / 2);
 
-                backoff_secs = 1;
+                let conn_start = tokio::time::Instant::now();
 
                 'conn: loop {
                     tokio::select! {
@@ -992,8 +992,14 @@ impl Connection {
                 if shutdown_sub.try_recv().is_ok() {
                     break;
                 }
+                if conn_start.elapsed() >= Duration::from_secs(backoff_secs.max(5)) {
+                    // Connection was stable — reset backoff
+                    backoff_secs = 1;
+                } else {
+                    // Connection died quickly — increase backoff
+                    backoff_secs = (backoff_secs * 2).min(30);
+                }
                 tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
-                backoff_secs = (backoff_secs * 2).min(30);
             }
         });
 

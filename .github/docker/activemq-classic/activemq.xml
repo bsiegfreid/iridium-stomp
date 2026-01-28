@@ -1,0 +1,51 @@
+<beans
+  xmlns="http://www.springframework.org/schema/beans"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.springframework.org/schema/beans
+    http://www.springframework.org/schema/beans/spring-beans.xsd
+    http://activemq.apache.org/schema/core
+    http://activemq.apache.org/schema/core/activemq-core.xsd">
+
+  <broker xmlns="http://activemq.apache.org/schema/core"
+          brokerName="localhost"
+          dataDirectory="${activemq.data}">
+
+    <!-- Pre-create a topic that guest cannot create -->
+    <destinations>
+      <topic physicalName="test.restricted"/>
+    </destinations>
+
+    <plugins>
+      <simpleAuthenticationPlugin anonymousAccessAllowed="false">
+        <users>
+          <authenticationUser username="admin" password="admin" groups="admins"/>
+          <authenticationUser username="guest" password="guest" groups="guests"/>
+        </users>
+      </simpleAuthenticationPlugin>
+
+      <authorizationPlugin>
+        <map>
+          <authorizationMap>
+            <authorizationEntries>
+              <!-- Admin: full access -->
+              <authorizationEntry topic=">" read="admins" write="admins" admin="admins"/>
+              <authorizationEntry queue=">" read="admins" write="admins" admin="admins"/>
+
+              <!-- Guest: read-only on the restricted topic (no admin = no create) -->
+              <authorizationEntry topic="test.restricted" read="guests" write="admins" admin="admins"/>
+
+              <!-- Advisory topics required for broker internals -->
+              <authorizationEntry topic="ActiveMQ.Advisory.>" read="guests,admins" write="guests,admins" admin="guests,admins"/>
+            </authorizationEntries>
+          </authorizationMap>
+        </map>
+      </authorizationPlugin>
+    </plugins>
+
+    <transportConnectors>
+      <transportConnector name="openwire" uri="tcp://0.0.0.0:61616"/>
+      <transportConnector name="stomp" uri="stomp://0.0.0.0:61613"/>
+    </transportConnectors>
+  </broker>
+
+</beans>
