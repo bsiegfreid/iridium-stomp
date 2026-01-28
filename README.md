@@ -17,8 +17,8 @@ An asynchronous STOMP 1.2 client library for Rust.
   spec, sends heartbeats when idle, and detects missed heartbeats from the
   server.
 
-- **Transparent reconnection** — Exponential backoff, automatic resubscription,
-  and pending message cleanup on disconnect.
+- **Transparent reconnection** — Stability-aware exponential backoff, automatic
+  resubscription, and pending message cleanup on disconnect.
 
 - **Small, explicit API** — One way to do things, clearly documented, easy to
   understand.
@@ -234,6 +234,46 @@ while let Some(received) = conn.next_frame().await {
     }
 }
 ```
+
+### Reconnection Backoff
+
+When a connection drops, the library automatically reconnects with exponential
+backoff and resubscribes to all active subscriptions. The backoff behavior is
+stability-aware: it distinguishes between a long-lived connection that dropped
+(transient failure) and a connection that dies immediately after connecting
+(persistent failure).
+
+**Stability-aware backoff:**
+
+- If the connection was alive for longer than `max(current_backoff, 5)` seconds,
+  it is considered stable. On disconnect, backoff resets to 1 second for a fast
+  reconnect.
+- If the connection dies quickly after establishing (e.g., the broker closes the
+  connection during resubscription), backoff doubles on each attempt up to a 30
+  second cap: 1s → 2s → 4s → 8s → 16s → 30s.
+- Authentication failures during CONNECT are backed off separately and do not
+  reset.
+
+| Scenario | Behavior |
+|----------|----------|
+| Stable connection drops after minutes | Reconnect in 1s (backoff resets) |
+| Broker rejects subscriptions and closes connection | 1s, 2s, 4s, 8s, 16s, 30s cap |
+| Authentication failure on reconnect | Exponential backoff (separate path) |
+| Broker unreachable | Exponential backoff up to 30s |
+
+#### Broker-Specific Notes
+
+**Artemis**: When Artemis rejects a SUBSCRIBE due to permissions, it sends a
+STOMP ERROR frame but does **not** close the TCP connection. This means the
+reconnect backoff path is not triggered — the error is delivered inline on the
+existing connection. The STOMP spec recommends that servers close the connection
+after sending an ERROR frame, but Artemis does not follow this for
+subscribe-level failures. The library will still surface these errors via
+`ReceivedFrame::Error` for application-level handling.
+
+**RabbitMQ**: Follows the STOMP spec more closely. Connection-level errors
+typically result in a TCP close, which triggers the reconnect backoff as
+expected.
 
 ## CLI
 
