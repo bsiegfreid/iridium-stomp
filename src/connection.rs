@@ -992,7 +992,7 @@ impl Connection {
                 if shutdown_sub.try_recv().is_ok() {
                     break;
                 }
-                if conn_start.elapsed() > Duration::from_secs(backoff_secs.max(5)) {
+                if conn_start.elapsed() >= Duration::from_secs(backoff_secs.max(5)) {
                     // Connection was stable — reset backoff
                     backoff_secs = 1;
                 } else {

@@ -245,20 +245,20 @@ stability-aware: it distinguishes between a long-lived connection that dropped
 
 **Stability-aware backoff:**
 
-- If the connection was alive for longer than `max(current_backoff, 5)` seconds,
+- If the connection was alive for at least `max(current_backoff, 5)` seconds,
   it is considered stable. On disconnect, backoff resets to 1 second for a fast
   reconnect.
 - If the connection dies quickly after establishing (e.g., the broker closes the
   connection during resubscription), backoff doubles on each attempt up to a 30
   second cap: 1s → 2s → 4s → 8s → 16s → 30s.
-- Authentication failures during CONNECT are backed off separately and do not
-  reset.
+- Authentication failures during reconnection continue exponential backoff
+  without checking connection stability (they do not trigger a backoff reset).
 
 | Scenario | Behavior |
 |----------|----------|
 | Stable connection drops after minutes | Reconnect in 1s (backoff resets) |
 | Broker rejects subscriptions and closes connection | 1s, 2s, 4s, 8s, 16s, 30s cap |
-| Authentication failure on reconnect | Exponential backoff (separate path) |
+| Authentication failure on reconnect | Exponential backoff (no stability-based reset) |
 | Broker unreachable | Exponential backoff up to 30s |
 
 #### Broker-Specific Notes
