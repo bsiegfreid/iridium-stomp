@@ -7,6 +7,9 @@ use tokio::sync::Mutex;
 /// Maximum number of messages to keep in the ring buffer for display
 pub const MAX_MESSAGES: usize = 1000;
 
+/// Maximum number of errors to keep in the ring buffer for display
+pub const MAX_ERRORS: usize = 100;
+
 /// Statistics for a single subscription destination
 #[derive(Debug, Clone, Default)]
 pub struct SubStats {
@@ -53,9 +56,13 @@ pub struct AppState {
     /// Messages (ring buffer for display)
     pub messages: VecDeque<DisplayMessage>,
 
+    /// Broker errors (separate ring buffer for error pane)
+    pub errors: VecDeque<DisplayMessage>,
+
     /// UI state
     pub show_headers: bool,
     pub scroll_offset: usize,
+    pub error_scroll_offset: usize,
 
     /// Current input buffer
     pub input: String,
@@ -86,8 +93,10 @@ impl AppState {
             warning_count: 0,
             info_count: 0,
             messages: VecDeque::with_capacity(MAX_MESSAGES),
+            errors: VecDeque::with_capacity(MAX_ERRORS),
             show_headers: false,
             scroll_offset: 0,
+            error_scroll_offset: 0,
             input: String::new(),
             cursor_pos: 0,
             command_history: Vec::new(),
@@ -131,7 +140,12 @@ impl AppState {
         // Update counters based on message type
         match destination {
             "SENT" => self.sent_count += 1,
-            "ERROR" | "BROKER ERROR" => self.error_count += 1,
+            "ERROR" => self.error_count += 1,
+            "BROKER ERROR" => {
+                // Broker errors go to the dedicated error pane
+                self.record_error(body, headers);
+                return;
+            }
             "WARN" => self.warning_count += 1,
             "INFO" => self.info_count += 1,
             _ => {
@@ -157,6 +171,25 @@ impl AppState {
         // Trim to max size
         while self.messages.len() > MAX_MESSAGES {
             self.messages.pop_front();
+        }
+    }
+
+    /// Record a broker error (displayed in separate error pane)
+    pub fn record_error(&mut self, body: String, headers: Vec<(String, String)>) {
+        self.error_count += 1;
+
+        let msg = DisplayMessage {
+            timestamp: Local::now(),
+            destination: "BROKER ERROR".to_string(),
+            body,
+            headers,
+        };
+
+        self.errors.push_back(msg);
+
+        // Trim to max size
+        while self.errors.len() > MAX_ERRORS {
+            self.errors.pop_front();
         }
     }
 
