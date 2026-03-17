@@ -523,6 +523,83 @@ pub fn negotiate_heartbeats(
     (outgoing, incoming)
 }
 
+/// Extract the destination from an ERROR frame.
+///
+/// Tries multiple strategies:
+/// 1. Check for a `destination` header (some brokers include it)
+/// 2. Parse the error message/body for `/topic/...` or `/queue/...` patterns
+///
+/// Returns `None` if no destination can be identified.
+fn extract_destination_from_error(frame: &Frame) -> Option<String> {
+    // Strategy 1: Check for destination header
+    if let Some(dest) = frame.get_header("destination") {
+        return Some(dest.to_string());
+    }
+
+    // Strategy 2: Look for destination pattern in message header or body
+    let message = frame.get_header("message").unwrap_or("");
+    let body = String::from_utf8_lossy(&frame.body);
+
+    // Combine message and body for searching
+    let text = format!("{} {}", message, body);
+
+    // Look for /topic/ or /queue/ patterns
+    for prefix in ["/topic/", "/queue/"] {
+        if let Some(start) = text.find(prefix) {
+            // Extract until whitespace, comma, quote, or end of string
+            let rest = &text[start..];
+            let end = rest
+                .find(|c: char| c.is_whitespace() || c == ',' || c == '"' || c == '\'')
+                .unwrap_or(rest.len());
+            if end > prefix.len() {
+                return Some(rest[..end].to_string());
+            }
+        }
+    }
+
+    None
+}
+
+/// Extract subscription ID from an ERROR frame message.
+///
+/// Looks for patterns like "subscription 1" or "subscription sub-1" in the
+/// error message or body. Artemis uses this format for subscription errors.
+fn extract_subscription_id_from_error(frame: &Frame) -> Option<String> {
+    let message = frame.get_header("message").unwrap_or("");
+    let body = String::from_utf8_lossy(&frame.body);
+    let text = format!("{} {}", message, body);
+
+    // Look for "subscription X" pattern (Artemis format)
+    if let Some(idx) = text.to_lowercase().find("subscription ") {
+        let rest = &text[idx + 13..]; // "subscription " is 13 chars
+        // Extract the subscription ID (could be numeric or alphanumeric like "sub-1")
+        let end = rest
+            .find(|c: char| c.is_whitespace() || c == ',' || c == '"' || c == '\'')
+            .unwrap_or(rest.len());
+        if end > 0 {
+            return Some(rest[..end].to_string());
+        }
+    }
+
+    None
+}
+
+/// Look up a destination by subscription ID in the subscriptions map.
+async fn lookup_destination_by_sub_id(
+    sub_id: &str,
+    subscriptions: &Arc<Mutex<Subscriptions>>,
+) -> Option<String> {
+    let map = subscriptions.lock().await;
+    for (dest, entries) in map.iter() {
+        for entry in entries {
+            if entry.id == sub_id {
+                return Some(dest.clone());
+            }
+        }
+    }
+    None
+}
+
 /// High-level connection object that manages a single TCP/STOMP connection.
 ///
 /// The `Connection` spawns a background task that maintains the TCP transport,
@@ -726,6 +803,16 @@ impl Connection {
             let mut current_framed = Some(framed);
             let mut current_send_interval = send_interval;
             let mut current_recv_interval = recv_interval;
+
+            // Track subscription errors across reconnections. If a subscription
+            // receives too many consecutive errors, we remove it to prevent
+            // error loops (e.g., Artemis sending repeated permission errors).
+            let mut subscription_errors: HashMap<String, u32> = HashMap::new();
+            // Track subscription IDs that have been abandoned so we can ignore
+            // subsequent errors for them.
+            let mut abandoned_sub_ids: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            const SUBSCRIPTION_ERROR_THRESHOLD: u32 = 3;
 
             loop {
                 let mut shutdown_sub = shutdown_tx_clone.subscribe();
@@ -962,6 +1049,63 @@ impl Connection {
                                         }
                                         // Don't forward RECEIPT frames to inbound channel
                                         continue;
+                                    } else if f.command == "ERROR" {
+                                        // Track subscription-related errors. If we see repeated
+                                        // errors for the same destination, remove the subscription
+                                        // to prevent error loops.
+                                        //
+                                        // First, check if this error is for an already-abandoned
+                                        // subscription (Artemis keeps sending errors after we abandon).
+                                        let sub_id = extract_subscription_id_from_error(&f);
+                                        if let Some(ref id) = sub_id
+                                            && abandoned_sub_ids.contains(id)
+                                        {
+                                            // Skip this error - subscription already abandoned
+                                            continue;
+                                        }
+
+                                        // Try to identify the destination:
+                                        // 1. Extract directly from ERROR frame
+                                        // 2. Look up by subscription ID (Artemis uses "subscription N")
+                                        let dest = if let Some(d) = extract_destination_from_error(&f)
+                                        {
+                                            Some(d)
+                                        } else if let Some(ref id) = sub_id {
+                                            lookup_destination_by_sub_id(id, &subscriptions).await
+                                        } else {
+                                            None
+                                        };
+
+                                        if let Some(dest) = dest {
+                                            let count = {
+                                                let c = subscription_errors
+                                                    .entry(dest.clone())
+                                                    .or_insert(0);
+                                                *c += 1;
+                                                *c
+                                            };
+
+                                            if count >= SUBSCRIPTION_ERROR_THRESHOLD {
+                                                // Remove the subscription from auto-resubscribe
+                                                let mut map = subscriptions.lock().await;
+                                                if map.remove(&dest).is_some() {
+                                                    // Track the subscription ID as abandoned
+                                                    if let Some(id) = sub_id {
+                                                        abandoned_sub_ids.insert(id);
+                                                    }
+                                                    // Send abandonment notification
+                                                    let msg = format!(
+                                                        "Subscription abandoned: {} errors for {}",
+                                                        count, dest
+                                                    );
+                                                    let abandon_frame = Frame::new("ERROR")
+                                                        .header("message", &msg)
+                                                        .header("destination", &dest)
+                                                        .header("x-abandoned", "true");
+                                                    let _ = in_tx.send(abandon_frame).await;
+                                                }
+                                            }
+                                        }
                                     }
 
                                     let _ = in_tx.send(f).await;
@@ -1998,5 +2142,116 @@ mod tests {
         } else {
             panic!("no outbound frame sent")
         }
+    }
+
+    #[test]
+    fn test_extract_destination_from_error_header() {
+        // When ERROR frame has destination header, extract it directly
+        let frame = Frame::new("ERROR")
+            .header("message", "AMQ339016: Error creating STOMP subscription")
+            .header("destination", "/topic/test.restricted");
+
+        let dest = extract_destination_from_error(&frame);
+        assert_eq!(dest, Some("/topic/test.restricted".to_string()));
+    }
+
+    #[test]
+    fn test_extract_destination_from_error_message() {
+        // When destination is in message header text
+        let frame = Frame::new("ERROR").header(
+            "message",
+            "AMQ339016: Error creating subscription for /topic/test.restricted",
+        );
+
+        let dest = extract_destination_from_error(&frame);
+        assert_eq!(dest, Some("/topic/test.restricted".to_string()));
+    }
+
+    #[test]
+    fn test_extract_destination_from_error_body() {
+        // When destination is in body text
+        let frame = Frame::new("ERROR")
+            .header("message", "AMQ339016: Error creating subscription")
+            .set_body(b"User guest is not authorized for /queue/orders".to_vec());
+
+        let dest = extract_destination_from_error(&frame);
+        assert_eq!(dest, Some("/queue/orders".to_string()));
+    }
+
+    #[test]
+    fn test_extract_destination_from_error_none() {
+        // When no destination can be identified
+        let frame = Frame::new("ERROR").header("message", "Generic error without destination info");
+
+        let dest = extract_destination_from_error(&frame);
+        assert_eq!(dest, None);
+    }
+
+    #[test]
+    fn test_extract_destination_from_error_with_trailing_punct() {
+        // When destination has trailing punctuation
+        let frame = Frame::new("ERROR").header(
+            "message",
+            "Error for /topic/events, please check permissions",
+        );
+
+        let dest = extract_destination_from_error(&frame);
+        assert_eq!(dest, Some("/topic/events".to_string()));
+    }
+
+    #[test]
+    fn test_extract_subscription_id_from_error_artemis_format() {
+        // Artemis format: "AMQ339016 Error creating subscription 1"
+        let frame =
+            Frame::new("ERROR").header("message", "AMQ339016 Error creating subscription 1");
+
+        let sub_id = extract_subscription_id_from_error(&frame);
+        assert_eq!(sub_id, Some("1".to_string()));
+    }
+
+    #[test]
+    fn test_extract_subscription_id_from_error_numeric() {
+        // Multiple digit subscription ID
+        let frame = Frame::new("ERROR").header("message", "Error for subscription 123 on server");
+
+        let sub_id = extract_subscription_id_from_error(&frame);
+        assert_eq!(sub_id, Some("123".to_string()));
+    }
+
+    #[test]
+    fn test_extract_subscription_id_from_error_none() {
+        // No subscription ID in error
+        let frame = Frame::new("ERROR").header("message", "Generic connection error");
+
+        let sub_id = extract_subscription_id_from_error(&frame);
+        assert_eq!(sub_id, None);
+    }
+
+    #[tokio::test]
+    async fn test_lookup_destination_by_sub_id() {
+        let subscriptions: Arc<Mutex<Subscriptions>> = Arc::new(Mutex::new(HashMap::new()));
+        let (sender, _rx) = mpsc::channel::<Frame>(4);
+
+        // Add a subscription
+        {
+            let mut map = subscriptions.lock().await;
+            map.insert(
+                "/topic/test.restricted".to_string(),
+                vec![SubscriptionEntry {
+                    id: "1".to_string(),
+                    sender,
+                    ack: "auto".to_string(),
+                    headers: Vec::new(),
+                }],
+            );
+        }
+
+        // Should find the destination
+        let dest = lookup_destination_by_sub_id("1", &subscriptions).await;
+        assert_eq!(dest, Some("/topic/test.restricted".to_string()));
+
+        // Should not find non-existent subscription
+        let dest = lookup_destination_by_sub_id("999", &subscriptions).await;
+        assert_eq!(dest, None);
     }
 }

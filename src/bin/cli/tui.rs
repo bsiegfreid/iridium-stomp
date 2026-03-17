@@ -212,6 +212,20 @@ async fn run_app(
                         let max_scroll = state.messages.len().saturating_sub(1);
                         state.scroll_offset = (state.scroll_offset + 10).min(max_scroll);
                     }
+                    // Error pane scrolling: Ctrl+E (up) and Ctrl+D (down)
+                    KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        let mut state = app.state.lock().await;
+                        if state.error_scroll_offset > 0 {
+                            state.error_scroll_offset -= 1;
+                        }
+                    }
+                    KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        let mut state = app.state.lock().await;
+                        let max_scroll = state.errors.len().saturating_sub(1);
+                        if state.error_scroll_offset < max_scroll {
+                            state.error_scroll_offset += 1;
+                        }
+                    }
                     KeyCode::Up if key.modifiers.is_empty() => {
                         let mut state = app.state.lock().await;
                         state.history_prev();
@@ -316,14 +330,14 @@ async fn run_app(
 fn ui(f: &mut ratatui::Frame, state: &super::state::AppState) {
     let size = f.area();
 
-    // Main layout: header, subscriptions, messages, input
+    // Main layout: header, subscriptions, content area, input
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),                                           // Header
             Constraint::Length(6 + state.subscriptions.len().min(5) as u16), // Subscriptions
-            Constraint::Min(5),                                              // Messages
-            Constraint::Length(3),                                           // Input
+            Constraint::Min(5),    // Content (messages + errors)
+            Constraint::Length(3), // Input
         ])
         .split(size);
 
@@ -333,8 +347,20 @@ fn ui(f: &mut ratatui::Frame, state: &super::state::AppState) {
     // Activity counts panel
     render_counts(f, chunks[1], state);
 
-    // Messages panel
-    render_messages(f, chunks[2], state);
+    // Content area: split between messages and errors if there are errors
+    if state.errors.is_empty() {
+        // No errors - full space for messages
+        render_messages(f, chunks[2], state);
+    } else {
+        // Split content area: messages on left (70%), errors on right (30%)
+        let content_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+            .split(chunks[2]);
+
+        render_messages(f, content_chunks[0], state);
+        render_errors(f, content_chunks[1], state);
+    }
 
     // Input bar
     render_input(f, chunks[3], state);
@@ -439,6 +465,11 @@ fn render_counts(f: &mut ratatui::Frame, area: Rect, state: &super::state::AppSt
     f.render_widget(table, area);
 }
 
+// TODO: Improve scrolling in message and error panes:
+// - Add scroll position indicator (e.g., "5/100" or scrollbar)
+// - Add Home/End keys to jump to top/bottom
+// - Consider vim-style j/k navigation
+// - Add search/filter functionality
 fn render_messages(f: &mut ratatui::Frame, area: Rect, state: &super::state::AppState) {
     let header_hint = if state.show_headers {
         "[^H] hide headers"
@@ -535,6 +566,117 @@ fn render_messages(f: &mut ratatui::Frame, area: Rect, state: &super::state::App
                     Style::default().fg(Color::DarkGray),
                 )]));
             }
+        }
+    }
+
+    let paragraph = Paragraph::new(lines);
+    f.render_widget(paragraph, inner);
+}
+
+fn render_errors(f: &mut ratatui::Frame, area: Rect, state: &super::state::AppState) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(
+            " Broker Errors ({}) [^E/^D scroll] ",
+            state.errors.len()
+        ))
+        .style(Style::default().fg(Color::Red));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // Calculate visible errors
+    let visible_height = inner.height as usize;
+    let total_errors = state.errors.len();
+
+    // Auto-scroll to bottom unless user has scrolled up
+    let scroll_offset = if state.error_scroll_offset == 0 && total_errors > visible_height {
+        total_errors.saturating_sub(visible_height)
+    } else {
+        state.error_scroll_offset
+    };
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    let line_width = inner.width as usize;
+
+    for (i, err) in state.errors.iter().enumerate() {
+        if i < scroll_offset {
+            continue;
+        }
+        if lines.len() >= visible_height {
+            break;
+        }
+
+        let time = err.timestamp.format("%H:%M:%S").to_string();
+
+        // First line: timestamp + start of error
+        let prefix_len = time.len() + 1; // "HH:MM:SS "
+        let first_line_body_len = line_width.saturating_sub(prefix_len);
+
+        if err.body.len() <= first_line_body_len {
+            // Fits on one line
+            lines.push(Line::from(vec![
+                Span::styled(time, Style::default().fg(Color::DarkGray)),
+                Span::raw(" "),
+                Span::styled(&err.body, Style::default().fg(Color::Red)),
+            ]));
+        } else {
+            // Wrap across multiple lines
+            lines.push(Line::from(vec![
+                Span::styled(time, Style::default().fg(Color::DarkGray)),
+                Span::raw(" "),
+                Span::styled(
+                    &err.body[..first_line_body_len],
+                    Style::default().fg(Color::Red),
+                ),
+            ]));
+
+            // Continuation lines (indented)
+            let indent = "         "; // 9 spaces to align with text after timestamp
+            let cont_width = line_width.saturating_sub(indent.len());
+            let mut pos = first_line_body_len;
+
+            while pos < err.body.len() && lines.len() < visible_height {
+                let end = (pos + cont_width).min(err.body.len());
+                lines.push(Line::from(vec![
+                    Span::raw(indent),
+                    Span::styled(&err.body[pos..end], Style::default().fg(Color::Red)),
+                ]));
+                pos = end;
+            }
+        }
+
+        // Show headers if toggled
+        if state.show_headers && !err.headers.is_empty() {
+            for (k, v) in &err.headers {
+                if lines.len() >= visible_height {
+                    break;
+                }
+                let header_line = format!("  {}: {}", k, v);
+                // Wrap header lines too
+                if header_line.len() <= line_width {
+                    lines.push(Line::from(vec![Span::styled(
+                        header_line,
+                        Style::default().fg(Color::DarkGray),
+                    )]));
+                } else {
+                    let mut pos = 0;
+                    while pos < header_line.len() && lines.len() < visible_height {
+                        let end = (pos + line_width).min(header_line.len());
+                        lines.push(Line::from(vec![Span::styled(
+                            header_line[pos..end].to_string(),
+                            Style::default().fg(Color::DarkGray),
+                        )]));
+                        pos = end;
+                    }
+                }
+            }
+        }
+
+        // Add blank line between errors for readability
+        if lines.len() < visible_height {
+            lines.push(Line::from(""));
         }
     }
 

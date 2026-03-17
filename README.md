@@ -264,16 +264,19 @@ stability-aware: it distinguishes between a long-lived connection that dropped
 #### Broker-Specific Notes
 
 **Artemis**: When Artemis rejects a SUBSCRIBE due to permissions, it sends a
-STOMP ERROR frame but does **not** close the TCP connection. This means the
-reconnect backoff path is not triggered — the error is delivered inline on the
-existing connection. The STOMP spec recommends that servers close the connection
-after sending an ERROR frame, but Artemis does not follow this for
-subscribe-level failures. The library will still surface these errors via
-`ReceivedFrame::Error` for application-level handling.
+STOMP ERROR frame but does **not** close the TCP connection. This violates the
+[STOMP 1.2 specification](https://stomp.github.io/stomp-specification-1.2.html),
+which states: "The server MAY send ERROR frames if something goes wrong. In this
+case, it **MUST** then close the connection just after sending the ERROR frame."
+Because Artemis keeps the connection open, the reconnect backoff path is never
+triggered — errors are delivered inline on the existing connection, potentially
+causing a rapid error loop if your application automatically retries
+subscriptions. The library surfaces these errors via `ReceivedFrame::Error` for
+application-level handling; you may need to implement your own rate limiting or
+circuit breaker for Artemis deployments.
 
-**RabbitMQ**: Follows the STOMP spec more closely. Connection-level errors
-typically result in a TCP close, which triggers the reconnect backoff as
-expected.
+**RabbitMQ**: Follows the STOMP spec correctly — ERROR frames are followed by
+connection close, which triggers the reconnect backoff as expected.
 
 ## CLI
 
@@ -349,6 +352,12 @@ Run the quickstart example:
 
 ```bash
 cargo run --example quickstart
+```
+
+Subscribe to multiple queues and print incoming messages (see also [`docs/subscriber-guide.md`](docs/subscriber-guide.md)):
+
+```bash
+cargo run --example multi_subscribe
 ```
 
 Stop the broker:
