@@ -4,7 +4,12 @@
 
 An asynchronous STOMP 1.2 client library for Rust.
 
-> **Early Development**: This library is heavily tested (300+ unit and fuzz tests) but has not yet been battle-tested in production environments. APIs may change. Use with appropriate caution.
+> **Early Development**: This library is heavily tested (300+ unit and fuzz
+> tests) but has not yet been battle-tested in production environments. APIs
+> may change. Use with appropriate caution. Early testing in production as a
+> monitoring tool has shown increased resilience over other tested libraries,
+> responds well to heartbeats for recognizing when connections have been
+> silently dropped, and automatically reconnects.
 
 ## Design Goals
 
