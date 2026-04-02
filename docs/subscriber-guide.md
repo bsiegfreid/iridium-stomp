@@ -176,6 +176,9 @@ while let Some(frame) = merged.next().await {
 
 ## Heartbeat configuration
 
+See [heartbeats.md](heartbeats.md) for a detailed guide on how negotiation
+works, the `Heartbeat` type, and monitoring.
+
 The default (`Connection::DEFAULT_HEARTBEAT`) negotiates 10-second heartbeats
 with the broker. The library disconnects and reconnects if no data is received
 for 2x the negotiated interval (20 seconds by default).
@@ -201,6 +204,9 @@ interval or isolate the connection task from CPU-heavy work.
 ---
 
 ## Durable subscriptions (ActiveMQ)
+
+See [durable_subscriptions.md](durable_subscriptions.md) for broker-specific
+recipes covering both ActiveMQ and RabbitMQ.
 
 For ActiveMQ durable topic subscribers — where the broker holds messages while
 your app is offline — pass the subscription name via `ConnectOptions` and
@@ -332,3 +338,12 @@ other indication of why. The error task above is the only way to detect this.
 - [ ] Run a separate task polling `conn.next_frame()` to catch broker ERROR frames and abandonment notifications
 - [ ] Handle `None` from `merged.next()` (means the `Connection` was closed, not a transient drop)
 - [ ] Test with the broker restarted mid-run to verify resubscription works
+
+---
+
+## What to read next
+
+- [Subscriptions](subscriptions.md) — full API reference for subscribe methods, `SubscriptionOptions`, and resubscribe behavior
+- [Durable Subscriptions](durable_subscriptions.md) — broker-specific recipes for RabbitMQ durable queues and ActiveMQ durable topics
+- [Heartbeats](heartbeats.md) — detailed heartbeat negotiation, the `Heartbeat` type, and monitoring via `with_heartbeat_notify`
+- [`multi_subscribe` example](../examples/multi_subscribe.rs) — runnable version of the patterns in this guide

@@ -4,12 +4,12 @@
 
 An asynchronous STOMP 1.2 client library for Rust.
 
-> **Early Development**: This library is heavily tested (300+ unit and fuzz
-> tests) but has not yet been battle-tested in production environments. APIs
-> may change. Use with appropriate caution. Early testing in production as a
-> monitoring tool has shown increased resilience over other tested libraries,
-> responds well to heartbeats for recognizing when connections have been
-> silently dropped, and automatically reconnects.
+> **Early Production Testing**: This library is heavily tested (300+ unit and
+> fuzz tests) and is currently in early production use as a monitoring and
+> message processing tool. In that role it has shown improved reliability over
+> previous libraries, surviving broker restarts, message queue cycling, and
+> heartbeat delays with automatic reconnection. Not all features have been
+> exercised in production yet. APIs may change.
 
 ## Design Goals
 
@@ -67,6 +67,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+## Documentation
+
+For a deeper understanding, read the docs in this order:
+
+1. **[STOMP 1.2 overview](docs/stomp_spec.md)** — protocol concepts (frames, commands, ack modes)
+2. **[Subscriber guide](docs/subscriber-guide.md)** — full tutorial covering connect, subscribe, ack, reconnect, and error handling
+3. **Reference docs** — [subscriptions](docs/subscriptions.md), [durable subscriptions](docs/durable_subscriptions.md), [heartbeats](docs/heartbeats.md)
+
+### Examples
+
+Run any example with `cargo run --example <name>` (requires a local STOMP broker):
+
+| Example | What it demonstrates |
+|---------|---------------------|
+| `quickstart` | Connect, send a message, receive one frame |
+| `subscribe` | Single subscription with `SubscriptionOptions` and per-message ack |
+| `multi_subscribe` | Multiple subscriptions merged into one stream, error monitoring, graceful shutdown |
+| `subscribe_with_headers` | Passing broker-specific headers via `subscribe_with_headers` |
+| `transactions` | Begin, commit, and abort transactions |
 
 ## Features
 
@@ -285,6 +305,9 @@ connection close, which triggers the reconnect backoff as expected.
 
 ## CLI
 
+See [docs/cli.md](docs/cli.md) for the full reference (all commands, TUI
+keyboard shortcuts, session reports, and exit codes).
+
 An interactive CLI is included for testing and ad-hoc messaging. Install with
 the `cli` feature:
 
@@ -345,24 +368,13 @@ Commands:
 Disconnecting...
 ```
 
-## Running the Examples
+## Running a Local Broker
 
-Start a local STOMP broker (RabbitMQ with STOMP plugin):
+Examples and integration tests require a STOMP broker. Start RabbitMQ with the
+STOMP plugin:
 
 ```bash
 docker stack deploy -c rabbitmq-stack.yaml rabbitmq
-```
-
-Run the quickstart example:
-
-```bash
-cargo run --example quickstart
-```
-
-Subscribe to multiple queues and print incoming messages (see also [`docs/subscriber-guide.md`](docs/subscriber-guide.md)):
-
-```bash
-cargo run --example multi_subscribe
 ```
 
 Stop the broker:
