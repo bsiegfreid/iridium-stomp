@@ -18,6 +18,8 @@ iridium-stomp provides three ways to subscribe to a destination:
 The simplest form. No extra headers or options.
 
 ```rust
+use iridium_stomp::AckMode;
+
 let sub = conn.subscribe("/queue/orders", AckMode::Auto).await?;
 ```
 
@@ -27,7 +29,7 @@ Accepts a `SubscriptionOptions` struct for typed configuration. Use this
 when you need a durable queue name or broker-specific headers.
 
 ```rust
-use iridium_stomp::SubscriptionOptions;
+use iridium_stomp::{AckMode, SubscriptionOptions};
 
 let opts = SubscriptionOptions {
     durable_queue: Some("/queue/my-durable-queue".to_string()),
@@ -46,6 +48,8 @@ SUBSCRIBE frame. Equivalent to `subscribe_with_options` with only the
 `headers` field set.
 
 ```rust
+use iridium_stomp::AckMode;
+
 let headers = vec![
     ("activemq.subscriptionName".to_string(), "my-sub".to_string()),
 ];

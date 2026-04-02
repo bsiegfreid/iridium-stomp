@@ -48,8 +48,10 @@ corresponding values:
 | Client to server | `max(cx, sy)` | How often the client will send heartbeats |
 | Server to client | `max(cy, sx)` | How often the client expects to receive heartbeats |
 
-If either side advertises `0` for a direction, that direction is disabled
-(the max of any value and `0` from the "cannot" side stays `0`).
+A direction is disabled only when the negotiated value is `0`. Since the
+formula uses `max()`, both sides must advertise `0` for that direction to
+be disabled. A `0` from one side alone does not disable the direction if
+the other side advertises a non-zero value (because `max(0, N) = N`).
 
 ---
 
@@ -59,6 +61,7 @@ If either side advertises `0` for a direction, that direction is disabled
 
 ```rust
 use iridium_stomp::{Connection, Heartbeat};
+use std::time::Duration;
 
 // Default: 10 seconds in both directions
 let hb = Heartbeat::default(); // "10000,10000"
