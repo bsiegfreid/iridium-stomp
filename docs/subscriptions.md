@@ -1,192 +1,108 @@
-Subscription options and durable subscriptions
-=============================================
+# Subscriptions
 
-This document explains how to use `SubscriptionOptions` (the typed options
-we added to `iridium-stomp`) to support durable/subscription-like behavior on
-common brokers: RabbitMQ and ActiveMQ.
+This document covers the subscription API in iridium-stomp: how to subscribe,
+the available methods, `SubscriptionOptions`, and how resubscription works
+across reconnects.
 
-Background
-----------
+For broker-specific durable subscription recipes, see
+[durable_subscriptions.md](durable_subscriptions.md).
 
-STOMP itself is a small, text-based protocol and does not mandate a single,
-portable mechanism for broker-side durable/topic subscriptions. Different
-brokers provide different mechanisms:
+---
 
-- RabbitMQ: use durable, named queues bound to exchanges. Messages published
-  to an exchange and routed to a durable queue will persist while the
-  consumer is offline (assuming messages are published as persistent).
-- ActiveMQ: supports broker-side durable topic subscriptions which normally
-  require a `client-id` on `CONNECT` plus a durable subscription name on
-  `SUBSCRIBE`. The exact header names are broker-specific — consult the
-  broker documentation.
+## Subscribe methods
 
-`iridium-stomp` approach
-------------------------
+iridium-stomp provides three ways to subscribe to a destination:
 
-To remain protocol- and broker-agnostic while still making these features
-practical, `iridium-stomp` provides two small, flexible helpers:
+### `subscribe(destination, ack)`
 
-- `Connection::subscribe_with_headers(destination, ack, extra_headers)` —
-  low-level convenience that forwards arbitrary header pairs on the
-  `SUBSCRIBE` frame and persists those pairs with the local subscription
-  bookkeeping so they are automatically re-sent after a reconnect.
+The simplest form. No extra headers or options.
 
-- `SubscriptionOptions` — a typed, ergonomic wrapper that includes:
-  - `headers: Vec<(String,String)>` — extra headers to include on `SUBSCRIBE`.
-  - `durable_queue: Option<String>` — convenience to override the destination
-    with a named queue (useful for RabbitMQ durable queues).
+```rust
+let sub = conn.subscribe("/queue/orders", AckMode::Auto).await?;
+```
 
-These options let users pass broker-specific headers to enable durable
-subscriptions on brokers that support them, while the library handles
-re-sending the same SUBSCRIBE on reconnect.
+### `subscribe_with_options(destination, ack, options)`
 
-RabbitMQ (durable queues)
--------------------------
+Accepts a `SubscriptionOptions` struct for typed configuration. Use this
+when you need a durable queue name or broker-specific headers.
 
-RabbitMQ does not implement ActiveMQ-style durable topic subscriptions. The
-recommended pattern is:
+```rust
+use iridium_stomp::SubscriptionOptions;
 
-1. Create a durable queue and bind it to an exchange with the desired
-   routing key(s). This is an administrative operation you can do via the
-   management UI, `rabbitmqadmin`, or the AMQP API. Example (rabbitmqadmin):
+let opts = SubscriptionOptions {
+    durable_queue: Some("/queue/my-durable-queue".to_string()),
+    headers: vec![],
+};
 
-   ```sh
-   rabbitmqadmin declare queue name=my-app-queue durable=true
-   rabbitmqadmin declare binding source=amq.topic destination=my-app-queue routing_key="topic.#"
-   ```
+let sub = conn
+    .subscribe_with_options("/exchange/amq.topic", AckMode::Client, opts)
+    .await?;
+```
 
-2. Ensure messages published to the exchange are persistent (broker-side
-   durability). How to mark messages persistent depends on the publisher
-   (AMQP clients have `delivery_mode`/`persistent` settings, STOMP
-   publishers may include broker-specific headers). See RabbitMQ docs.
+### `subscribe_with_headers(destination, ack, extra_headers)`
 
-3. Subscribe to the named durable queue using `SubscriptionOptions.durable_queue`:
+Low-level convenience that forwards arbitrary header pairs on the
+SUBSCRIBE frame. Equivalent to `subscribe_with_options` with only the
+`headers` field set.
 
-   ```rust
-   use iridium_stomp::{Connection, SubscriptionOptions};
-   use iridium_stomp::connection::AckMode;
-   use tokio::runtime::Runtime;
+```rust
+let headers = vec![
+    ("activemq.subscriptionName".to_string(), "my-sub".to_string()),
+];
+let sub = conn
+    .subscribe_with_headers("/topic/events", AckMode::Client, headers)
+    .await?;
+```
 
-   // create a small runtime for the example and unwrap results for simplicity
-   let rt = Runtime::new().expect("create tokio runtime");
-   rt.block_on(async {
-     let conn = Connection::connect(
-       "127.0.0.1:61613",
-       "guest",
-       "guest",
-       Connection::DEFAULT_HEARTBEAT,
-     ).await.unwrap();
+---
 
-     let opts = SubscriptionOptions {
-       durable_queue: Some("/queue/my-app-queue".to_string()),
-       headers: vec![],
-     };
+## `SubscriptionOptions`
 
-     let _subscription = conn
-       .subscribe_with_options("/exchange/amq.topic", AckMode::Client, opts)
-       .await
-       .unwrap();
+| Field | Type | Purpose |
+|-------|------|---------|
+| `durable_queue` | `Option<String>` | Override the destination with a named queue (useful for RabbitMQ durable queues). |
+| `headers` | `Vec<(String, String)>` | Extra headers included on the SUBSCRIBE frame (e.g., broker-specific durable subscription names). |
 
-     // subscription now reads from the durable named queue. Messages that arrived
-     // while the consumer was offline will be delivered when the client
-     // re-subscribes to the same queue name.
-   });
-   ```
+Both fields are preserved internally and replayed on reconnect.
 
-Notes:
-- The library will persist any headers you set in `SubscriptionOptions.headers`
-  and will resend them on reconnect, so re-subscribing to the same durable
-  queue is automatic.
-- The publisher must mark messages persistent if you need durability across
-  broker restarts. The details are publisher- and broker-specific.
+---
 
-ActiveMQ (durable topic subscriptions)
---------------------------------------
+## Ack modes
 
-ActiveMQ exposes a broker-side durable subscription mechanism for topics.
-Typical steps are:
+The ack mode is set per subscription and determines how the broker tracks
+message delivery. See also the
+[ack modes section in the subscriber guide](subscriber-guide.md#ack-modes).
 
-1. Establish a `CONNECT` frame that includes a broker `client-id` (this
-   ties durable subscriptions to a client identity).
-2. Issue a `SUBSCRIBE` frame with the durable subscription name (broker
-   specific header such as `activemq.subscriptionName` or similar — check
-   the broker docs for the exact header required).
+| Mode | Behavior |
+|------|----------|
+| `AckMode::Auto` | Broker considers the message delivered as soon as it sends it. No ACK frame needed. |
+| `AckMode::Client` | Client must ACK. Acknowledging a message implicitly acknowledges all prior messages on that subscription (cumulative). |
+| `AckMode::ClientIndividual` | Client must ACK each message independently. |
 
-In `iridium-stomp` you can pass the per-subscription durable header via
-`SubscriptionOptions.headers` so the library will forward it on `SUBSCRIBE`
-and persist it for resubscribe on reconnect.
+---
 
-Example:
+## Resubscribe on reconnect
 
-   ```rust,no_run
-   use iridium_stomp::{Connection, ConnectOptions, SubscriptionOptions};
-   use iridium_stomp::connection::AckMode;
-   use tokio::runtime::Runtime;
+When the connection drops and is re-established, iridium-stomp
+automatically re-issues SUBSCRIBE frames for every active subscription.
+The original destination, ack mode, subscription ID, and any extra headers
+or options you provided are all preserved and replayed.
 
-   // create a small runtime for the example and unwrap results for simplicity
-   let rt = Runtime::new().expect("create tokio runtime");
-   rt.block_on(async {
-     // ActiveMQ requires a `client-id` on CONNECT to make subscriptions durable.
-     // Use ConnectOptions to set the client-id:
-     let connect_opts = ConnectOptions::new()
-       .client_id("my-durable-client");
+This means:
 
-     let conn = Connection::connect_with_options(
-       "activemq-host:61613",
-       "user",
-       "pass",
-       Connection::NO_HEARTBEAT,
-       connect_opts,
-     ).await.unwrap();
+- Durable queue names (`durable_queue`) are sent again, so the broker
+  resumes delivery from the same queue.
+- Broker-specific headers (e.g., `activemq.subscriptionName`) are resent,
+  so durable topic subscriptions are restored.
+- Your application code does not need to handle resubscription — the
+  `Subscription` stream simply pauses during the outage and resumes when
+  the connection comes back.
 
-     let mut headers = Vec::new();
-     // Example header — consult ActiveMQ STOMP docs for the exact header name
-     headers.push(("activemq.subscriptionName".to_string(), "my-durable-sub".to_string()));
+---
 
-     let opts = SubscriptionOptions {
-       durable_queue: None,
-       headers,
-     };
+## Unsubscribe
 
-     let _subscription = conn
-       .subscribe_with_options("/topic/my-topic", AckMode::Client, opts)
-       .await
-       .unwrap();
-   });
-   ```
-
-Important caveats:
-- Header names for durable subscriptions are broker-specific — consult your
-  broker's STOMP documentation.
-
-Resubscribe behavior
---------------------
-
-`iridium-stomp` persists the subscribe headers you supply in
-`SubscriptionEntry` and automatically re-issues the same `SUBSCRIBE` frames
-(if the connection is re-established). This is intended to make durable
-subscriber workflows simpler: when you reconnect, the crate will attempt to
-recreate your subscriptions with the same headers and ids.
-
-Recommendations
----------------
-
-- For RabbitMQ durability, prefer creating named durable queues bound to
-  exchanges and subscribe to the named queue via
-  `SubscriptionOptions.durable_queue`. Document the queue binding and
-  persistent publishing policies in your app's deployment instructions.
-
-- For ActiveMQ durable topic semantics, use `ConnectOptions` to set the
-  `client-id` header on CONNECT, and `SubscriptionOptions` to set the
-  durable subscription name header on SUBSCRIBE.
-
-- If you need richer broker-specific automation (for example creating
-  durable queues and bindings programmatically), consider an adapter or a
-  small helper that talks to the broker's management API — that is out of
-  scope for the STOMP client but can be added as an optional helper.
-
-References
-----------
-- RabbitMQ documentation: <https://www.rabbitmq.com/> (see "exchanges, queues and bindings")
-- ActiveMQ STOMP docs: consult the ActiveMQ documentation for the version you run for exact header names and durable subscription behavior.
-
+To stop receiving messages, drop the `Subscription` handle or call
+`unsubscribe`. The library sends an UNSUBSCRIBE frame and removes the
+subscription from its internal tracking so it will not be resubscribed
+on reconnect.
