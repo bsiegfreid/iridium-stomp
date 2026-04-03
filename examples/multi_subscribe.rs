@@ -15,7 +15,7 @@
 //   cargo run --example multi_subscribe
 
 use futures::{StreamExt, stream};
-use iridium_stomp::connection::AckMode;
+use iridium_stomp::AckMode;
 use iridium_stomp::{Connection, ReceivedFrame};
 use tokio::signal;
 

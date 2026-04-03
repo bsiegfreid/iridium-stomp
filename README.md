@@ -33,34 +33,46 @@ An asynchronous STOMP 1.2 client library for Rust.
 
 ## Quick Start
 
+**Send a message:**
+
 ```rust,no_run
-use iridium_stomp::{Connection, Frame, ReceivedFrame};
+use iridium_stomp::Connection;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Connect to a STOMP broker
     let conn = Connection::connect(
         "127.0.0.1:61613",
         "guest",
         "guest",
-        Connection::DEFAULT_HEARTBEAT,  // 10 seconds send/receive
+        Connection::DEFAULT_HEARTBEAT,
     ).await?;
 
-    // Send a message
-    let msg = Frame::new("SEND")
-        .header("destination", "/queue/test")
-        .set_body(b"hello from iridium-stomp".to_vec());
-    conn.send_frame(msg).await?;
+    conn.send("/queue/test", "hello from iridium-stomp").await?;
 
-    // Subscribe to a queue
-    let mut subscription = conn
-        .subscribe("/queue/test", iridium_stomp::AckMode::Auto)
-        .await?;
+    conn.close().await;
+    Ok(())
+}
+```
 
-    // Receive messages using the Stream trait
-    use futures::StreamExt;
-    while let Some(frame) = subscription.next().await {
-        println!("Received: {:?}", frame);
+**Listen for messages:**
+
+```rust,no_run
+use futures::StreamExt;
+use iridium_stomp::{AckMode, Connection};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let conn = Connection::connect(
+        "127.0.0.1:61613",
+        "guest",
+        "guest",
+        Connection::DEFAULT_HEARTBEAT,
+    ).await?;
+
+    let mut sub = conn.subscribe("/queue/test", AckMode::Auto).await?;
+
+    while let Some(frame) = sub.next().await {
+        println!("Received: {}", frame);
     }
 
     conn.close().await;
@@ -82,7 +94,9 @@ Run any example with `cargo run --example <name>` (requires a local STOMP broker
 
 | Example | What it demonstrates |
 |---------|---------------------|
-| `quickstart` | Connect, send a message, receive one frame |
+| `send` | Send a text message with the convenience method |
+| `send_advanced` | Build a SEND frame with custom headers |
+| `listen` | Subscribe and print incoming messages |
 | `subscribe` | Single subscription with `SubscriptionOptions` and per-message ack |
 | `multi_subscribe` | Multiple subscriptions merged into one stream, error monitoring, graceful shutdown |
 | `subscribe_with_headers` | Passing broker-specific headers via `subscribe_with_headers` |

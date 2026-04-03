@@ -1234,6 +1234,22 @@ impl Connection {
         }
     }
 
+    /// Send a text message to a destination.
+    ///
+    /// This is a convenience wrapper around [`send_frame`](Self::send_frame)
+    /// for the common case of sending a string payload with no extra headers.
+    ///
+    /// # Example
+    /// ```ignore
+    /// conn.send("/queue/test", "hello").await?;
+    /// ```
+    pub async fn send(&self, destination: &str, body: impl Into<String>) -> Result<(), ConnError> {
+        let frame = Frame::new("SEND")
+            .header("destination", destination)
+            .set_body(body.into().into_bytes());
+        self.send_frame(frame).await
+    }
+
     pub async fn send_frame(&self, frame: Frame) -> Result<(), ConnError> {
         // Send a frame to the background writer task.
         //
