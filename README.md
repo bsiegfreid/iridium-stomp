@@ -90,7 +90,8 @@ For a deeper understanding, read the docs in this order:
 
 ### Examples
 
-Run any example with `cargo run --example <name>` (requires a local STOMP broker):
+Run any example with `cargo run --example <name>` (requires a local STOMP broker
+and the `futures` crate for examples that use `StreamExt`):
 
 | Example | What it demonstrates |
 |---------|---------------------|
@@ -388,13 +389,13 @@ Examples and integration tests require a STOMP broker. Start RabbitMQ with the
 STOMP plugin:
 
 ```bash
-docker stack deploy -c rabbitmq-stack.yaml rabbitmq
+docker compose up -d
 ```
 
 Stop the broker:
 
 ```bash
-docker stack rm rabbitmq
+docker compose down
 ```
 
 ## Testing
@@ -445,18 +446,18 @@ Use the provided helper script which mimics the CI workflow:
 ./scripts/test-with-rabbit.sh
 ```
 
-Or manually with docker swarm:
+Or manually with docker compose:
 
 ```bash
 # Start RabbitMQ with STOMP
-docker stack deploy -c rabbitmq-stack.yaml rabbitmq
+docker compose up -d
 
 # Wait for it to be ready (management UI at http://localhost:15672)
 # Then run the smoke test
 RUN_STOMP_SMOKE=1 cargo test --test stomp_smoke
 
 # Cleanup
-docker stack rm rabbitmq
+docker compose down
 ```
 
 The smoke test is skipped by default unless `RUN_STOMP_SMOKE=1` is set, since it requires an external broker.

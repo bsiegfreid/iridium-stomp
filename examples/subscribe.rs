@@ -4,7 +4,7 @@ use iridium_stomp::{AckMode, Connection, SubscriptionOptions};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This example expects a STOMP broker on localhost:61613 (e.g. RabbitMQ with stomp plugin).
-    // Start a local broker before running: `docker stack deploy -c rabbitmq-stack.yaml rabbitmq`
+    // Start a local broker before running: `docker compose up -d`
 
     // Connect with a heartbeat request (client_out=10000ms, client_in=10000ms)
     let conn = Connection::connect(

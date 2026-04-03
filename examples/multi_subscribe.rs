@@ -9,7 +9,7 @@
 //   - Graceful shutdown on Ctrl+C
 //
 // Start a local broker before running:
-//   docker stack deploy -c rabbitmq-stack.yaml rabbitmq
+//   docker compose up -d
 //
 // Then run:
 //   cargo run --example multi_subscribe
