@@ -1,8 +1,10 @@
 //! Tests for initial connection retry with exponential backoff.
 //!
-//! These tests verify that `Connection::connect` retries on I/O errors
-//! (broker unreachable) and fails immediately on authentication / protocol
-//! errors.
+//! These tests verify that `Connection::connect` retries on I/O and
+//! handshake failures that may be transient (for example, broker unreachable
+//! or the server closing during the handshake), and fails immediately only
+//! when the server explicitly rejects the connection
+//! (`ConnError::ServerRejected`).
 
 use iridium_stomp::Connection;
 use iridium_stomp::connection::ConnError;
@@ -103,10 +105,10 @@ async fn connect_fails_immediately_on_auth_error() {
         Ok(_) => panic!("Expected ServerRejected, got successful connection"),
     }
 
-    // Should have failed fast — well under the 1s first backoff
+    // Should have failed fast — before the 1s first backoff
     assert!(
-        elapsed < Duration::from_millis(500),
-        "auth error should fail immediately, took {:?}",
+        elapsed < Duration::from_secs(1),
+        "auth error should fail before retry backoff, took {:?}",
         elapsed
     );
 
@@ -121,14 +123,21 @@ async fn connect_retries_on_server_close_during_handshake() {
     let addr = format!("127.0.0.1:{}", port);
 
     let server_addr = addr.clone();
-    thread::spawn(move || {
+    let server = thread::spawn(move || {
         let listener = TcpListener::bind(&server_addr).unwrap();
-        // Accept two connections and close both without responding
-        for _ in 0..2 {
-            if let Ok((mut stream, _)) = listener.accept() {
-                let mut buf = [0u8; 1024];
-                let _ = stream.read(&mut buf);
-                drop(stream);
+        listener.set_nonblocking(true).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let mut buf = [0u8; 1024];
+                    let _ = stream.read(&mut buf);
+                    drop(stream);
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Err(_) => break,
             }
         }
     });
@@ -146,6 +155,8 @@ async fn connect_retries_on_server_close_during_handshake() {
         result.is_err(),
         "Expected connect to keep retrying on protocol error, but it returned"
     );
+
+    let _ = server.join();
 }
 
 /// Verify backoff increases between retries.

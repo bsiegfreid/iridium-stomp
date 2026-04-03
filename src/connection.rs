@@ -811,9 +811,10 @@ impl Connection {
                 &custom_headers,
             );
 
-            if framed.send(StompItem::Frame(connect)).await.is_err() {
+            if let Err(e) = framed.send(StompItem::Frame(connect)).await {
                 tracing::warn!(
                     addr = %addr,
+                    error = %e,
                     backoff_secs,
                     "failed to send CONNECT frame, retrying in {}s",
                     backoff_secs,
@@ -903,9 +904,10 @@ impl Connection {
                                 &custom_headers,
                             );
 
-                            if framed.send(StompItem::Frame(connect)).await.is_err() {
+                            if let Err(e) = framed.send(StompItem::Frame(connect)).await {
                                 tracing::warn!(
                                     addr = %addr,
+                                    error = %e,
                                     backoff_secs,
                                     "reconnect: failed to send CONNECT frame, retrying in {}s",
                                     backoff_secs,

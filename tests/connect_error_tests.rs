@@ -74,16 +74,21 @@ async fn connect_closed_before_connected_retries() {
 
     // Spawn a mock server that closes immediately after receiving CONNECT
     let server_addr = addr.clone();
-    thread::spawn(move || {
+    let server = thread::spawn(move || {
         let listener = TcpListener::bind(&server_addr).unwrap();
-        listener.set_nonblocking(false).unwrap();
-
-        // Accept and close twice so the client can retry
-        for _ in 0..2 {
-            if let Ok((mut stream, _)) = listener.accept() {
-                let mut buf = [0u8; 1024];
-                let _ = stream.read(&mut buf);
-                drop(stream);
+        listener.set_nonblocking(true).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let mut buf = [0u8; 1024];
+                    let _ = stream.read(&mut buf);
+                    drop(stream);
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Err(_) => break,
             }
         }
     });
@@ -102,6 +107,8 @@ async fn connect_closed_before_connected_retries() {
         result.is_err(),
         "Expected connect to keep retrying when server closes during handshake"
     );
+
+    let _ = server.join();
 }
 
 /// Test that connection refused retries (does not fail immediately).

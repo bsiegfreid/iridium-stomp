@@ -281,9 +281,9 @@ for both the **initial connection** and **reconnection after a drop**. This
 means your application can start before the broker is available —
 `Connection::connect` will retry until the broker comes up.
 
-Authentication and protocol errors fail immediately on the initial connection
-so that bad configuration is surfaced fast (e.g., wrong credentials return
-`ConnError::ServerRejected` without retrying).
+Authentication failures (`ConnError::ServerRejected`) fail immediately on
+the initial connection so that bad configuration is surfaced fast. Other
+handshake and protocol failures are retried with exponential backoff.
 
 **Initial connection:**
 
