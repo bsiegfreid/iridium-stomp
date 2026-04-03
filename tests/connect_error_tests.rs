@@ -65,69 +65,65 @@ async fn connect_error_frame_returns_server_rejected() {
     server.join().unwrap();
 }
 
-/// Test that server closing connection before CONNECTED returns Protocol error
+/// Test that server closing connection before CONNECTED causes a retry
+/// (not an immediate failure). Protocol errors during handshake are transient.
 #[tokio::test]
-async fn connect_closed_before_connected_returns_protocol_error() {
+async fn connect_closed_before_connected_retries() {
     let port = get_available_port();
     let addr = format!("127.0.0.1:{}", port);
 
     // Spawn a mock server that closes immediately after receiving CONNECT
     let server_addr = addr.clone();
-    let server = thread::spawn(move || {
+    thread::spawn(move || {
         let listener = TcpListener::bind(&server_addr).unwrap();
         listener.set_nonblocking(false).unwrap();
 
-        if let Ok((mut stream, _)) = listener.accept() {
-            // Read the CONNECT frame
-            let mut buf = [0u8; 1024];
-            let _ = stream.read(&mut buf);
-
-            // Close without sending CONNECTED
-            drop(stream);
+        // Accept and close twice so the client can retry
+        for _ in 0..2 {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf);
+                drop(stream);
+            }
         }
     });
 
     // Give server time to start
     thread::sleep(Duration::from_millis(50));
 
-    // Attempt connection
-    let result = Connection::connect(&addr, "user", "pass", "0,0").await;
+    // Should keep retrying, not return an error
+    let result = tokio::time::timeout(
+        Duration::from_millis(500),
+        Connection::connect(&addr, "user", "pass", "0,0"),
+    )
+    .await;
 
-    // Should get Protocol error about connection closed
-    match result {
-        Err(ConnError::Protocol(msg)) => {
-            assert!(
-                msg.contains("closed") || msg.contains("CONNECTED"),
-                "Expected message about connection closed, got: {}",
-                msg
-            );
-        }
-        Err(ConnError::Io(_)) => {
-            // Also acceptable - connection reset
-        }
-        Err(other) => panic!("Expected Protocol or Io error, got: {:?}", other),
-        Ok(_) => panic!("Expected error, got successful connection"),
-    }
-
-    server.join().unwrap();
+    assert!(
+        result.is_err(),
+        "Expected connect to keep retrying when server closes during handshake"
+    );
 }
 
-/// Test that connection refused returns Io error
+/// Test that connection refused retries (does not fail immediately).
+///
+/// With initial connection retry, an unreachable broker causes `connect` to
+/// retry with backoff. We verify it does *not* return within a short window,
+/// then cancel the attempt.
 #[tokio::test]
-async fn connect_refused_returns_io_error() {
-    // Use a port that nothing is listening on
+async fn connect_refused_retries_instead_of_failing() {
     let port = get_available_port();
     let addr = format!("127.0.0.1:{}", port);
 
-    // Don't start any server - port should be closed
+    // No server listening — connect should retry, not return an error.
+    let result = tokio::time::timeout(
+        Duration::from_millis(500),
+        Connection::connect(&addr, "user", "pass", "0,0"),
+    )
+    .await;
 
-    let result = Connection::connect(&addr, "user", "pass", "0,0").await;
-
-    match result {
-        Err(ConnError::Io(err)) => {
-            assert_eq!(err.kind(), std::io::ErrorKind::ConnectionRefused);
-        }
-        Err(other) => panic!("Expected Io error, got: {:?}", other),
-        Ok(_) => panic!("Expected error, got successful connection"),
-    }
+    // Timeout means connect is still retrying — expected behaviour.
+    assert!(
+        result.is_err(),
+        "Expected connect to keep retrying, but it returned"
+    );
 }

@@ -47,7 +47,7 @@ Use `SubscriptionOptions.durable_queue` to subscribe to the named queue:
 
 ```rust
 use iridium_stomp::{Connection, SubscriptionOptions};
-use iridium_stomp::connection::AckMode;
+use iridium_stomp::AckMode;
 
 let conn = Connection::connect(
     "127.0.0.1:61613",
@@ -87,7 +87,7 @@ requires two things:
 
 ```rust
 use iridium_stomp::{Connection, ConnectOptions, SubscriptionOptions};
-use iridium_stomp::connection::AckMode;
+use iridium_stomp::AckMode;
 
 let options = ConnectOptions::new()
     .client_id("my-durable-client");

@@ -115,7 +115,7 @@ let options = ConnectOptions::default()
     .with_heartbeat_notify(tx);
 
 let conn = Connection::connect_with_options(
-    "127.0.0.1:61613", "guest", "guest", "10000,10000", options
+    "127.0.0.1:61613", "guest", "guest", Connection::DEFAULT_HEARTBEAT, options
 ).await?;
 
 // In another task:

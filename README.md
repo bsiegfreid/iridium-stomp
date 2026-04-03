@@ -134,7 +134,7 @@ connection if the server stops responding.
 Subscribe to destinations with automatic resubscription on reconnect:
 
 ```rust,ignore
-use iridium_stomp::connection::AckMode;
+use iridium_stomp::AckMode;
 
 // Auto-acknowledge (server considers delivered immediately)
 let sub = conn.subscribe("/queue/events", AckMode::Auto).await?;
@@ -150,7 +150,7 @@ For broker-specific headers (durable subscriptions, selectors, etc.):
 
 ```rust,ignore
 use iridium_stomp::SubscriptionOptions;
-use iridium_stomp::connection::AckMode;
+use iridium_stomp::AckMode;
 
 let options = SubscriptionOptions {
     headers: vec![
@@ -274,15 +274,26 @@ while let Some(received) = conn.next_frame().await {
 }
 ```
 
-### Reconnection Backoff
+### Connection Retry and Reconnection Backoff
 
-When a connection drops, the library automatically reconnects with exponential
-backoff and resubscribes to all active subscriptions. The backoff behavior is
-stability-aware: it distinguishes between a long-lived connection that dropped
-(transient failure) and a connection that dies immediately after connecting
-(persistent failure).
+The library uses exponential backoff (1s → 2s → 4s → 8s → 16s → 30s cap)
+for both the **initial connection** and **reconnection after a drop**. This
+means your application can start before the broker is available —
+`Connection::connect` will retry until the broker comes up.
 
-**Stability-aware backoff:**
+Authentication and protocol errors fail immediately on the initial connection
+so that bad configuration is surfaced fast (e.g., wrong credentials return
+`ConnError::ServerRejected` without retrying).
+
+**Initial connection:**
+
+| Scenario | Behavior |
+|----------|----------|
+| Broker unreachable at startup | Retries with exponential backoff up to 30s cap |
+| Broker crashes mid-handshake | Retries with exponential backoff |
+| Bad credentials | Fails immediately (`ConnError::ServerRejected`) |
+
+**Reconnection after a drop (stability-aware):**
 
 - If the connection was alive for at least `max(current_backoff, 5)` seconds,
   it is considered stable. On disconnect, backoff resets to 1 second for a fast

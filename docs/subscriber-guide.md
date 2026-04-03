@@ -51,7 +51,7 @@ Multiple subscriptions are merged into a single stream using
 ```rust
 use futures::{StreamExt, stream};
 use iridium_stomp::Connection;
-use iridium_stomp::connection::AckMode;
+use iridium_stomp::AckMode;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -100,7 +100,17 @@ during the outage and resumes when the connection comes back.
 
 ---
 
-## How reconnection works (what you actually observe)
+## How connection retry and reconnection work
+
+### Initial connection
+
+`Connection::connect` retries automatically if the broker is unreachable,
+using exponential backoff (1s → 2s → 4s → … → 30s cap). This means your
+application can start before the broker is available — it will connect once
+the broker comes up. Authentication errors (`ConnError::ServerRejected`)
+fail immediately so that bad configuration is surfaced fast.
+
+### Reconnection after a drop
 
 When the connection drops:
 
@@ -214,7 +224,7 @@ your app is offline — pass the subscription name via `ConnectOptions` and
 
 ```rust
 use iridium_stomp::{Connection, ConnectOptions, SubscriptionOptions};
-use iridium_stomp::connection::AckMode;
+use iridium_stomp::AckMode;
 
 let options = ConnectOptions::new()
     .client_id("my-app-instance-1");  // required for durable subs on ActiveMQ
