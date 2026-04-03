@@ -355,7 +355,7 @@ impl AckMode {
 ///     "localhost:61613",
 ///     "guest",
 ///     "guest",
-///     "10000,10000",
+///     Connection::DEFAULT_HEARTBEAT,
 ///     options,
 /// ).await?;
 /// ```
@@ -675,6 +675,11 @@ impl Connection {
     /// This is a convenience wrapper around `connect_with_options()` that uses
     /// default options (STOMP 1.2, host="/", no client-id).
     ///
+    /// If the broker is unreachable, this method retries with exponential
+    /// backoff (1s → 2s → 4s → … → 30s cap). Authentication errors
+    /// (`ConnError::ServerRejected`) fail immediately. See
+    /// [`connect_with_options`](Self::connect_with_options) for full details.
+    ///
     /// Parameters
     /// - `addr`: TCP address (host:port) of the STOMP server.
     /// - `login`: login username for STOMP `CONNECT`.
@@ -682,9 +687,10 @@ impl Connection {
     /// - `client_hb`: client's `heart-beat` header value ("cx,cy" in
     ///   milliseconds) that will be sent in the `CONNECT` frame.
     ///
-    /// Returns a `Connection` which provides `send_frame`, `next_frame`, and
-    /// `close` helpers. The detailed connection handling (I/O, heartbeats,
-    /// reconnects) runs on a background task spawned by this method.
+    /// Returns a `Connection` which provides `send`, `send_frame`,
+    /// `next_frame`, and `close` helpers. The detailed connection handling
+    /// (I/O, heartbeats, reconnects) runs on a background task spawned by
+    /// this method.
     pub async fn connect(
         addr: &str,
         login: &str,
@@ -709,13 +715,21 @@ impl Connection {
     ///   milliseconds) that will be sent in the `CONNECT` frame.
     /// - `options`: custom connection options (version, host, client-id, etc.).
     ///
+    /// # Connection Behavior
+    ///
+    /// If the broker is unreachable, the method retries with exponential
+    /// backoff (1s → 2s → 4s → … → 30s cap) — the same strategy used for
+    /// reconnection after a connection drop. This means your application can
+    /// start before the broker is available and will connect once it comes up.
+    ///
     /// # Errors
     ///
-    /// Returns an error if:
-    /// - The TCP connection cannot be established (`ConnError::Io`)
+    /// Returns an error immediately (no retry) if:
     /// - The server rejects the connection, e.g., due to invalid credentials
     ///   (`ConnError::ServerRejected`)
-    /// - The server closes the connection without responding (`ConnError::Protocol`)
+    ///
+    /// All other errors (TCP refused, connection closed mid-handshake, I/O
+    /// failures) are retried with backoff.
     ///
     /// # Example
     ///
@@ -730,7 +744,7 @@ impl Connection {
     ///     "localhost:61613",
     ///     "guest",
     ///     "guest",
-    ///     "10000,10000",
+    ///     Connection::DEFAULT_HEARTBEAT,
     ///     options,
     /// ).await?;
     /// ```
@@ -763,34 +777,81 @@ impl Connection {
         let custom_headers = options.headers;
         let heartbeat_notify_tx = options.heartbeat_tx;
 
-        // Perform initial connection and STOMP handshake before spawning background task.
-        // This ensures authentication errors are returned to the caller immediately.
-        let stream = TcpStream::connect(&addr).await?;
-        let mut framed = Framed::new(stream, StompCodec::new());
+        // Perform initial connection and STOMP handshake before spawning
+        // background task. Retries with exponential backoff on I/O and
+        // protocol errors (broker unreachable or crashing mid-handshake)
+        // using the same strategy as reconnection. Only ServerRejected
+        // (authentication failure) fails immediately.
+        let mut backoff_secs: u64 = 1;
+        let (framed, send_interval, recv_interval) = loop {
+            let stream = match TcpStream::connect(&addr).await {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!(
+                        addr = %addr,
+                        error = %e,
+                        backoff_secs,
+                        "initial connect failed, retrying in {}s",
+                        backoff_secs,
+                    );
+                    tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+                    backoff_secs = (backoff_secs * 2).min(30);
+                    continue;
+                }
+            };
+            let mut framed = Framed::new(stream, StompCodec::new());
 
-        // Build and send CONNECT frame
-        let connect = Self::build_connect_frame(
-            &accept_version,
-            &host,
-            &login,
-            &passcode,
-            &client_hb,
-            &client_id,
-            &custom_headers,
-        );
+            let connect = Self::build_connect_frame(
+                &accept_version,
+                &host,
+                &login,
+                &passcode,
+                &client_hb,
+                &client_id,
+                &custom_headers,
+            );
 
-        framed
-            .send(StompItem::Frame(connect))
-            .await
-            .map_err(|e| ConnError::Io(std::io::Error::other(e)))?;
+            if let Err(e) = framed.send(StompItem::Frame(connect)).await {
+                tracing::warn!(
+                    addr = %addr,
+                    error = %e,
+                    backoff_secs,
+                    "failed to send CONNECT frame, retrying in {}s",
+                    backoff_secs,
+                );
+                tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+                backoff_secs = (backoff_secs * 2).min(30);
+                continue;
+            }
 
-        // Wait for CONNECTED or ERROR response
-        let server_heartbeat = Self::await_connected_response(&mut framed).await?;
-
-        // Calculate heartbeat intervals
-        let (cx, cy) = parse_heartbeat_header(&client_hb);
-        let (sx, sy) = parse_heartbeat_header(&server_heartbeat);
-        let (send_interval, recv_interval) = negotiate_heartbeats(cx, cy, sx, sy);
+            match Self::await_connected_response(&mut framed).await {
+                Ok(server_hb) => {
+                    tracing::info!(addr = %addr, "connected to broker");
+                    let (cx, cy) = parse_heartbeat_header(&client_hb);
+                    let (sx, sy) = parse_heartbeat_header(&server_hb);
+                    let (si, ri) = negotiate_heartbeats(cx, cy, sx, sy);
+                    break (framed, si, ri);
+                }
+                // Auth errors fail immediately — bad config should not be retried
+                Err(e @ ConnError::ServerRejected(_)) => {
+                    return Err(e);
+                }
+                // I/O and protocol errors during handshake (e.g., broker
+                // crashed or closed mid-handshake) — retry with backoff
+                Err(e) => {
+                    tracing::warn!(
+                        addr = %addr,
+                        error = %e,
+                        backoff_secs,
+                        "handshake failed, retrying in {}s",
+                        backoff_secs,
+                    );
+                    tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+                    backoff_secs = (backoff_secs * 2).min(30);
+                    continue;
+                }
+            }
+        };
 
         // Now spawn background task for ongoing I/O and reconnection
         let shutdown_tx_clone = shutdown_tx.clone();
@@ -843,15 +904,22 @@ impl Connection {
                                 &custom_headers,
                             );
 
-                            if framed.send(StompItem::Frame(connect)).await.is_err() {
+                            if let Err(e) = framed.send(StompItem::Frame(connect)).await {
+                                tracing::warn!(
+                                    addr = %addr,
+                                    error = %e,
+                                    backoff_secs,
+                                    "reconnect: failed to send CONNECT frame, retrying in {}s",
+                                    backoff_secs,
+                                );
                                 tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
                                 backoff_secs = (backoff_secs * 2).min(30);
                                 continue;
                             }
 
-                            // Wait for CONNECTED (on reconnect, silently retry on ERROR)
                             match Self::await_connected_response(&mut framed).await {
                                 Ok(server_hb) => {
+                                    tracing::info!(addr = %addr, "reconnected to broker");
                                     let (cx, cy) = parse_heartbeat_header(&client_hb);
                                     let (sx, sy) = parse_heartbeat_header(&server_hb);
                                     let (si, ri) = negotiate_heartbeats(cx, cy, sx, sy);
@@ -859,15 +927,28 @@ impl Connection {
                                     current_recv_interval = ri;
                                     framed
                                 }
-                                Err(_) => {
-                                    // Reconnect failed (auth error or other), retry with backoff
+                                Err(e) => {
+                                    tracing::warn!(
+                                        addr = %addr,
+                                        error = %e,
+                                        backoff_secs,
+                                        "reconnect: handshake failed, retrying in {}s",
+                                        backoff_secs,
+                                    );
                                     tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
                                     backoff_secs = (backoff_secs * 2).min(30);
                                     continue;
                                 }
                             }
                         }
-                        Err(_) => {
+                        Err(e) => {
+                            tracing::warn!(
+                                addr = %addr,
+                                error = %e,
+                                backoff_secs,
+                                "reconnect: broker unreachable, retrying in {}s",
+                                backoff_secs,
+                            );
                             tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
                             backoff_secs = (backoff_secs * 2).min(30);
                             continue;
@@ -1136,12 +1217,25 @@ impl Connection {
                 if shutdown_sub.try_recv().is_ok() {
                     break;
                 }
-                if conn_start.elapsed() >= Duration::from_secs(backoff_secs.max(5)) {
+                let stable_duration = conn_start.elapsed();
+                if stable_duration >= Duration::from_secs(backoff_secs.max(5)) {
                     // Connection was stable — reset backoff
                     backoff_secs = 1;
+                    tracing::info!(
+                        addr = %addr,
+                        stable_secs = stable_duration.as_secs(),
+                        "connection dropped after stable session, reconnecting in 1s",
+                    );
                 } else {
                     // Connection died quickly — increase backoff
                     backoff_secs = (backoff_secs * 2).min(30);
+                    tracing::warn!(
+                        addr = %addr,
+                        stable_secs = stable_duration.as_secs(),
+                        backoff_secs,
+                        "connection dropped quickly, reconnecting in {}s",
+                        backoff_secs,
+                    );
                 }
                 tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
             }
