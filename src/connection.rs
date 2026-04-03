@@ -1234,6 +1234,22 @@ impl Connection {
         }
     }
 
+    /// Send a text message to a destination.
+    ///
+    /// This is a convenience wrapper around [`send_frame`](Self::send_frame)
+    /// for the common case of sending a string payload with no extra headers.
+    ///
+    /// # Example
+    /// ```ignore
+    /// conn.send("/queue/test", "hello").await?;
+    /// ```
+    pub async fn send(&self, destination: &str, body: impl AsRef<str>) -> Result<(), ConnError> {
+        let frame = Frame::new("SEND")
+            .header("destination", destination)
+            .set_body(body.as_ref().as_bytes().to_vec());
+        self.send_frame(frame).await
+    }
+
     pub async fn send_frame(&self, frame: Frame) -> Result<(), ConnError> {
         // Send a frame to the background writer task.
         //
@@ -2139,6 +2155,23 @@ mod tests {
         // verify ABORT frame was emitted
         if let Some(StompItem::Frame(f)) = out_rx.recv().await {
             verify_transaction_frame(f, "ABORT", "tx1");
+        } else {
+            panic!("no outbound frame sent")
+        }
+    }
+
+    #[tokio::test]
+    async fn test_send_convenience_produces_correct_frame() {
+        let (conn, mut out_rx) = setup_test_connection();
+
+        conn.send("/queue/events", "hello world")
+            .await
+            .expect("send failed");
+
+        if let Some(StompItem::Frame(f)) = out_rx.recv().await {
+            assert_eq!(f.command, "SEND");
+            assert_eq!(f.get_header("destination"), Some("/queue/events"));
+            assert_eq!(f.body, b"hello world");
         } else {
             panic!("no outbound frame sent")
         }

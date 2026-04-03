@@ -3,9 +3,15 @@ use iridium_stomp::{Connection, Frame};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // This example expects a STOMP broker on localhost:61613 (e.g. RabbitMQ with stomp plugin).
-    // Start a local broker before running: `docker compose up -d` from the repo root.
+    // Start a local broker before running: `docker compose up -d`
 
-    let conn = Connection::connect("127.0.0.1:61613", "guest", "guest", "10000,10000").await?;
+    let conn = Connection::connect(
+        "127.0.0.1:61613",
+        "guest",
+        "guest",
+        Connection::DEFAULT_HEARTBEAT,
+    )
+    .await?;
 
     // Begin a transaction
     let tx_id = "tx-example-1";

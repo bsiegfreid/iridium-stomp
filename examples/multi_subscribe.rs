@@ -9,13 +9,13 @@
 //   - Graceful shutdown on Ctrl+C
 //
 // Start a local broker before running:
-//   docker stack deploy -c rabbitmq-stack.yaml rabbitmq
+//   docker compose up -d
 //
 // Then run:
 //   cargo run --example multi_subscribe
 
 use futures::{StreamExt, stream};
-use iridium_stomp::connection::AckMode;
+use iridium_stomp::AckMode;
 use iridium_stomp::{Connection, ReceivedFrame};
 use tokio::signal;
 
