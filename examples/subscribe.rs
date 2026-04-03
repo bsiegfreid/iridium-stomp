@@ -35,7 +35,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("received frame:\n{}", frame);
 
         // read message-id header for ACK
-        let msg_id = frame.get_header("message-id").map(|v| v.to_string());
+        let msg_id = frame
+            .headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("message-id"))
+            .map(|(_, v)| v.to_string());
 
         if let Some(id) = msg_id {
             // Acknowledge the message via the subscription convenience method

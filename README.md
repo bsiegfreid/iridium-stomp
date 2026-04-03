@@ -54,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-**Listen for messages:**
+**Listen for messages** (add `futures = "0.3"` to your `Cargo.toml`)**:**
 
 ```rust,no_run
 use futures::StreamExt;
@@ -90,8 +90,7 @@ For a deeper understanding, read the docs in this order:
 
 ### Examples
 
-Run any example with `cargo run --example <name>` (requires a local STOMP broker
-and the `futures` crate for examples that use `StreamExt`):
+Run any example with `cargo run --example <name>` (requires a local STOMP broker):
 
 | Example | What it demonstrates |
 |---------|---------------------|
