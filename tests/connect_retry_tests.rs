@@ -32,7 +32,7 @@ async fn connect_succeeds_after_broker_starts_late() {
 
     // Start a mock STOMP server after a delay
     let server_addr = addr.clone();
-    thread::spawn(move || {
+    let server = thread::spawn(move || {
         // Wait so the client hits at least one retry
         thread::sleep(Duration::from_secs(2));
 
@@ -69,6 +69,7 @@ async fn connect_succeeds_after_broker_starts_late() {
     );
 
     conn.unwrap().close().await;
+    server.join().unwrap();
 }
 
 /// Bad credentials fail immediately — no retry.
@@ -156,7 +157,7 @@ async fn connect_retries_on_server_close_during_handshake() {
         "Expected connect to keep retrying on protocol error, but it returned"
     );
 
-    let _ = server.join();
+    server.join().unwrap();
 }
 
 /// Verify backoff increases between retries.
@@ -193,7 +194,7 @@ async fn connect_retry_then_auth_error_fails_fast() {
     let addr = format!("127.0.0.1:{}", port);
 
     let server_addr = addr.clone();
-    thread::spawn(move || {
+    let server = thread::spawn(move || {
         // Delay so client hits at least one TCP retry
         thread::sleep(Duration::from_millis(1500));
 
@@ -235,6 +236,8 @@ async fn connect_retry_then_auth_error_fails_fast() {
         "unexpected timing: {:?}",
         elapsed
     );
+
+    server.join().unwrap();
 }
 
 /// Multiple retry attempts actually happen (counted by a mock server).

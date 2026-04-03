@@ -108,7 +108,7 @@ async fn connect_closed_before_connected_retries() {
         "Expected connect to keep retrying when server closes during handshake"
     );
 
-    let _ = server.join();
+    server.join().unwrap();
 }
 
 /// Test that connection refused retries (does not fail immediately).
