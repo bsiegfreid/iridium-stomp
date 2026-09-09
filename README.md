@@ -1,7 +1,7 @@
 <p align="center">
   <img
     src="https://raw.githubusercontent.com/iridiumdesign/iridium-stomp/main/branding/iridium-stomp-github-banner.png"
-    alt="iridium-stomp — frame relay :: async rust"
+    alt="iridium-stomp"
     width="880">
 </p>
 
